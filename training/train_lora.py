@@ -167,27 +167,44 @@ def train(args):
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    training_args = TrainingArguments(
-        output_dir=target_dir,
-        per_device_train_batch_size=args.batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        learning_rate=args.learning_rate,
-        lr_scheduler_type="cosine",
-        warmup_ratio=0.03,
-        num_train_epochs=args.epochs if not args.smoke_test else 1,
-        max_steps=args.max_steps if (args.max_steps and args.max_steps > 0) else -1,
-        logging_steps=1 if args.smoke_test else 10,
-        save_strategy="steps",
-        save_steps=args.save_steps,
-        save_total_limit=3,
-        eval_strategy="no" if args.smoke_test else ("steps" if val_dataset else "no"),
-        eval_steps=args.eval_steps if val_dataset else None,
-        fp16=(torch_dtype == torch.float16),
-        bf16=(torch_dtype == torch.bfloat16),
-        report_to="none",
-        dataloader_num_workers=0,
-        dataloader_pin_memory=torch.cuda.is_available(),
-    )
+    # Construct TrainingArguments safely across transformers versions
+    import inspect
+    sig = inspect.signature(TrainingArguments.__init__).parameters
+    training_kwargs = {
+        "output_dir": target_dir,
+        "per_device_train_batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "learning_rate": args.learning_rate,
+        "lr_scheduler_type": "cosine",
+        "num_train_epochs": args.epochs if not args.smoke_test else 1,
+        "max_steps": args.max_steps if (args.max_steps and args.max_steps > 0) else -1,
+        "logging_steps": 1 if args.smoke_test else 10,
+        "save_strategy": "steps",
+        "save_steps": args.save_steps,
+        "save_total_limit": 3,
+        "fp16": (torch_dtype == torch.float16),
+        "bf16": (torch_dtype == torch.bfloat16),
+        "report_to": "none",
+        "dataloader_num_workers": 0,
+        "dataloader_pin_memory": torch.cuda.is_available(),
+    }
+
+    eval_val = "no" if args.smoke_test else ("steps" if val_dataset else "no")
+    if "eval_strategy" in sig:
+        training_kwargs["eval_strategy"] = eval_val
+    elif "evaluation_strategy" in sig:
+        training_kwargs["evaluation_strategy"] = eval_val
+
+    if val_dataset and not args.smoke_test:
+        training_kwargs["eval_steps"] = args.eval_steps
+
+    if "warmup_ratio" in sig:
+        training_kwargs["warmup_ratio"] = 0.03
+    elif "warmup_steps" in sig:
+        training_kwargs["warmup_steps"] = 20
+
+    filtered_training_kwargs = {k: v for k, v in training_kwargs.items() if k in sig}
+    training_args = TrainingArguments(**filtered_training_kwargs)
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True)
 

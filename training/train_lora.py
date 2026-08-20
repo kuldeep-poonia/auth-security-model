@@ -132,6 +132,11 @@ class SecurityDataset(Dataset):
 
 
 def train(args):
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     target_dir = args.drive_dir if args.drive_dir else args.output_dir
     os.makedirs(target_dir, exist_ok=True)
 
@@ -158,7 +163,7 @@ def train(args):
             args.max_length = min(args.max_length, 128)
             args.batch_size = 1
             args.gradient_accumulation_steps = 1
-
+            
     train_dataset = SecurityDataset(train_items, tokenizer, max_length=args.max_length)
     val_dataset = SecurityDataset(val_items, tokenizer, max_length=args.max_length) if val_items else None
 
@@ -340,13 +345,13 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1,
-        help="Per-device batch size for training",
+        default=2,
+        help="Batch size per device",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
-        default=16,
+        default=8,
         help="Number of gradient accumulation steps",
     )
     parser.add_argument(
@@ -382,7 +387,7 @@ def parse_args():
     parser.add_argument(
         "--max_length",
         type=int,
-        default=768,
+        default=512,
         help="Maximum tokenized sequence length",
     )
     parser.add_argument(

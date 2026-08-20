@@ -233,8 +233,8 @@ def train(args):
         "save_steps": args.save_steps,
         "save_total_limit": 5,
         "load_best_model_at_end": True if (val_dataset and not args.smoke_test) else False,
-        "metric_for_best_model": "eval_loss",
-        "greater_is_better": False,
+        "metric_for_best_model": "eval_f1" if (val_dataset and not args.smoke_test) else "eval_loss",
+        "greater_is_better": True if (val_dataset and not args.smoke_test) else False,
         "fp16": torch.cuda.is_available(),
         "bf16": False,
         "gradient_checkpointing": True if torch.cuda.is_available() else False,
@@ -264,10 +264,69 @@ def train(args):
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True)
 
-    callbacks = []
+    def preprocess_logits_for_metrics(logits, labels):
+        if isinstance(logits, tuple):
+            logits = logits[0]
+        return logits.argmax(dim=-1)
+
+    def compute_metrics(eval_pred):
+        predictions, labels = eval_pred
+        true_pos, false_pos, true_neg, false_neg = 0, 0, 0, 0
+
+        for pred_ids, label_ids in zip(predictions, labels):
+            mask = (label_ids != -100)
+            if not mask.any():
+                continue
+            target_text = tokenizer.decode(label_ids[mask], skip_special_tokens=True).lower()
+            pred_text = tokenizer.decode(pred_ids[mask], skip_special_tokens=True).lower()
+
+            is_true_vuln = ('"vulnerable": true' in target_text or '"is_vulnerable": true' in target_text)
+            is_pred_vuln = ('"vulnerable": true' in pred_text or '"is_vulnerable": true' in pred_text)
+
+            if is_true_vuln and is_pred_vuln:
+                true_pos += 1
+            elif not is_true_vuln and is_pred_vuln:
+                false_pos += 1
+            elif not is_true_vuln and not is_pred_vuln:
+                true_neg += 1
+            else:
+                false_neg += 1
+
+        prec = true_pos / (true_pos + false_pos) if (true_pos + false_pos) > 0 else 0.0
+        rec = true_pos / (true_pos + false_neg) if (true_pos + false_neg) > 0 else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+        total = true_pos + false_pos + true_neg + false_neg
+        acc = (true_pos + true_neg) / total if total > 0 else 0.0
+        spec = true_neg / (true_neg + false_pos) if (true_neg + false_pos) > 0 else 0.0
+
+        return {
+            "f1": round(f1, 4),
+            "accuracy": round(acc, 4),
+            "precision": round(prec, 4),
+            "recall": round(rec, 4),
+            "specificity": round(spec, 4),
+        }
+
+    from transformers import TrainerCallback, EarlyStoppingCallback
+    class EvalLoggingCallback(TrainerCallback):
+        def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+            if metrics:
+                step = state.global_step
+                loss = metrics.get("eval_loss", 0.0)
+                f1 = metrics.get("eval_f1", 0.0)
+                acc = metrics.get("eval_accuracy", 0.0) * 100
+                rec = metrics.get("eval_recall", 0.0) * 100
+                prec = metrics.get("eval_precision", 0.0) * 100
+                spec = metrics.get("eval_specificity", 0.0) * 100
+                print(
+                    f"\n[EVAL STEP {step}] eval_loss: {loss:.4f} | eval_f1: {f1:.4f} | "
+                    f"eval_rec: {rec:.1f}% | eval_prec: {prec:.1f}% | eval_spec: {spec:.1f}% | eval_acc: {acc:.1f}%\n",
+                    flush=True,
+                )
+
+    callbacks = [EvalLoggingCallback()]
     if val_dataset and not args.smoke_test:
-        from transformers import EarlyStoppingCallback
-        callbacks.append(EarlyStoppingCallback(early_stopping_patience=8, early_stopping_threshold=0.001))
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=6, early_stopping_threshold=0.001))
 
     trainer = Trainer(
         model=model,
@@ -275,6 +334,8 @@ def train(args):
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         data_collator=data_collator,
+        compute_metrics=compute_metrics if (val_dataset and not args.smoke_test) else None,
+        preprocess_logits_for_metrics=preprocess_logits_for_metrics if (val_dataset and not args.smoke_test) else None,
         callbacks=callbacks,
     )
 
@@ -376,13 +437,13 @@ def parse_args():
     parser.add_argument(
         "--save_steps",
         type=int,
-        default=50,
+        default=25,
         help="Checkpoint save interval in steps",
     )
     parser.add_argument(
         "--eval_steps",
         type=int,
-        default=50,
+        default=25,
         help="Evaluation interval in steps",
     )
     parser.add_argument(

@@ -31,53 +31,56 @@ def format_user_prompt(code: str, language: str) -> str:
 def derive_calibrated_confidence(record: Dict[str, Any]) -> float:
     """Derive calibrated continuous confidence score (0.0 to 1.0) based on source certainty tier and signal ambiguity."""
     import hashlib
-    
-    # If explicitly set to an intermediate float, respect it
-    if "confidence_target" in record and record["confidence_target"] not in (1.0, 0.0):
-        return round(float(record["confidence_target"]), 2)
 
     is_vuln = bool(record.get("is_vulnerable", False))
     source = str(record.get("source", "")).lower()
     certainty = str(record.get("certainty", "")).lower()
     is_synth = bool(record.get("is_synthetic", False))
+    rec_id = str(record.get("id", ""))
+    h_val = int(hashlib.md5(rec_id.encode()).hexdigest()[:4], 16)
 
     if is_vuln:
-        # Tier 1A: Verified Real CVE Fixes (NVD/GHSA, CVEfixes, CrossVul, PrimeVul) -> 0.92 - 0.98
+        # Tier 1 (High Certainty): Verified Real CVE Fixes (NVD/GHSA, CVEfixes, CrossVul, PrimeVul) -> 0.90 - 0.98
         if source in ("github_advisories", "cvefixes", "crossvul", "primevul") or (certainty == "high" and not is_synth):
-            h_val = int(hashlib.md5(str(record.get("id", "")).encode()).hexdigest()[:4], 16) % 7
-            return round(0.92 + (h_val * 0.01), 2)  # 0.92 to 0.98
+            offset = (h_val % 9) * 0.01
+            return round(0.90 + offset, 2)  # 0.90 to 0.98
 
-        # Tier 1B: Real-Code Injected Mutations (100% Ground Truth by Construction) -> 0.88 - 0.95
-        elif is_synth or source == "real_code_mutation":
-            h_val = int(hashlib.md5(str(record.get("id", "")).encode()).hexdigest()[:4], 16) % 8
-            return round(0.88 + (h_val * 0.01), 2)  # 0.88 to 0.95
-
-        # Tier 2: Third-Party Disclosures (HackerOne, Bugcrowd) -> 0.75 - 0.85
+        # Tier 2 (Moderate-High Certainty): Third-Party Disclosures & Verified Bug Bounties -> 0.78 - 0.88
         elif source in ("hackerone_disclosures", "bugcrowd_disclosures") or certainty == "medium":
-            h_val = int(hashlib.md5(str(record.get("id", "")).encode()).hexdigest()[:4], 16) % 11
-            return round(0.75 + (h_val * 0.01), 2)  # 0.75 to 0.85
+            offset = (h_val % 11) * 0.01
+            return round(0.78 + offset, 2)  # 0.78 to 0.88
 
-        # Tier 3: Lower Certainty / Pattern-Mined -> 0.55 - 0.70 (Borderline / worth reviewing)
+        # Tier 3 (Intermediate / Borderline Vuln): Pattern-Mined / Static Heuristic Signals -> 0.55 - 0.72
+        elif source in ("github_pattern_mining", "heuristic_scans") or certainty == "low":
+            offset = (h_val % 18) * 0.01
+            return round(0.55 + offset, 2)  # 0.55 to 0.72
+
+        # Tier 4 (Mutations): Real-Code Injected Mutations -> 0.85 - 0.95
         else:
-            h_val = int(hashlib.md5(str(record.get("id", "")).encode()).hexdigest()[:4], 16) % 16
-            return round(0.55 + (h_val * 0.01), 2)  # 0.55 to 0.70
+            offset = (h_val % 11) * 0.01
+            return round(0.85 + offset, 2)  # 0.85 to 0.95
 
     else:
         # Clean Negative Cases
-        # Tier 1: Verified Framework Clean Modules -> 0.02 - 0.06
-        if source in ("real_framework_negative", "curated_clean_patterns") or (certainty == "high" and not is_synth):
-            h_val = int(hashlib.md5(str(record.get("id", "")).encode()).hexdigest()[:4], 16) % 5
-            return round(0.02 + (h_val * 0.01), 2)  # 0.02 to 0.06
+        # Tier 1: Verified Framework Clean Modules (Pure Core) -> 0.02 - 0.08
+        if source in ("real_framework_negative", "curated_clean_patterns") and "hard_negative" not in source:
+            offset = (h_val % 7) * 0.01
+            return round(0.02 + offset, 2)  # 0.02 to 0.08
 
-        # Tier 2: Fixed-Pair Clean Versions / Refactorings -> 0.06 - 0.15
-        elif is_synth or "fixed" in str(record.get("id", "")):
-            h_val = int(hashlib.md5(str(record.get("id", "")).encode()).hexdigest()[:4], 16) % 10
-            return round(0.06 + (h_val * 0.01), 2)  # 0.06 to 0.15
+        # Tier 2: Fixed-Pair Clean Versions / Post-Patch Refactorings -> 0.08 - 0.20
+        elif "fixed" in rec_id or "patch" in rec_id or source in ("cvefixes_fixed", "crossvul_fixed"):
+            offset = (h_val % 13) * 0.01
+            return round(0.08 + offset, 2)  # 0.08 to 0.20
 
-        # Tier 3: Ambiguous / Complex Clean Code Units -> 0.20 - 0.35
+        # Tier 3: Intermediate Suspicious Clean / Hard Negatives (Complex Handlers) -> 0.25 - 0.45
+        elif "hard_negative" in source or source in ("curated_suspicious_clean", "github_pattern_mining") or certainty in ("medium", "low"):
+            offset = (h_val % 21) * 0.01
+            return round(0.25 + offset, 2)  # 0.25 to 0.45
+
+        # Tier 4: Standard Clean Negative Base -> 0.05 - 0.15
         else:
-            h_val = int(hashlib.md5(str(record.get("id", "")).encode()).hexdigest()[:4], 16) % 16
-            return round(0.20 + (h_val * 0.01), 2)  # 0.20 to 0.35
+            offset = (h_val % 11) * 0.01
+            return round(0.05 + offset, 2)  # 0.05 to 0.15
 
 
 def format_assistant_response(record: Dict[str, Any]) -> str:

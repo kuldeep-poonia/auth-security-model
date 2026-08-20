@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest cache
+.pytest_cache/
+
+# Local runs and checkpoints (synced with Drive)
+checkpoints/
+runs/*.jsonl
+!runs/.gitkeep
+
+# Environments
+.venv/
+venv/
+ENV/
+
+# Large raw crawls and intermediate manifests
+data/raw/
+data/raw_staging_manifest.json
+data/cleaned_dataset_manifest.json
+data/cleaned_negative_examples.json
+data/cleaned_positive_pairs.json
+

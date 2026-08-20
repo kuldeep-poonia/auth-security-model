@@ -246,12 +246,32 @@ def train(args):
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True)
 
+class SecurityTrainer(Trainer):
+    """Custom Trainer implementing memory-fused FP16 cross-entropy loss to bypass Hugging Face's 10GB FP32 logits upcasting bug."""
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels") if "labels" in inputs else None
+        outputs = model(**inputs)
+
+        if labels is None:
+            return (outputs.loss, outputs) if return_outputs else outputs.loss
+
+        logits = outputs.logits
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
+        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+        return (loss, outputs) if return_outputs else loss
+
+
     callbacks = []
     if val_dataset and not args.smoke_test:
         from transformers import EarlyStoppingCallback
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=8, early_stopping_threshold=0.001))
 
-    trainer = Trainer(
+    trainer = SecurityTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
@@ -328,13 +348,13 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=2,
+        default=1,
         help="Batch size per device",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
-        default=8,
+        default=16,
         help="Number of gradient accumulation steps",
     )
     parser.add_argument(

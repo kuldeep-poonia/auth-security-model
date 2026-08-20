@@ -3,8 +3,11 @@
 Run this script directly inside a Kaggle notebook cell.
 """
 
-import argparse
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+import argparse
 import subprocess
 import sys
 

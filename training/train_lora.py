@@ -171,8 +171,8 @@ def train(args):
 
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    # Configure Model Loading (0.5B model fits completely in native FP16 in < 1GB VRAM)
-    device_map = "auto" if torch.cuda.is_available() else None
+    # Configure Model Loading (0.5B model fits completely in native FP16 on single GPU in < 1GB VRAM)
+    device_map = {"": 0} if torch.cuda.is_available() else None
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
     print(f"[INFO] Loading base model in native FP16: {args.model_id} (weight memory: 959 MB)")
@@ -183,6 +183,8 @@ def train(args):
         trust_remote_code=True,
     )
     model.config.use_cache = False
+    if torch.cuda.is_available():
+        model.enable_input_require_grads()
 
     # Configure LoRA
     print(f"[INFO] Setting up LoRA (r={args.lora_r}, alpha={args.lora_alpha}, target_modules={DEFAULT_TARGET_MODULES})")
@@ -219,6 +221,7 @@ def train(args):
         "greater_is_better": False,
         "fp16": torch.cuda.is_available(),
         "bf16": False,
+        "gradient_checkpointing": True if torch.cuda.is_available() else False,
         "report_to": "none",
         "dataloader_num_workers": 0,
         "dataloader_pin_memory": torch.cuda.is_available(),

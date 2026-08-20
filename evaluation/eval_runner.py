@@ -3,33 +3,39 @@ import json
 import os
 import sys
 from datetime import datetime
+from typing import Optional, Dict, Any
 
 # Ensure project root in sys.path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+import torch
 from evaluation.eval_model import load_model_for_evaluation, run_evaluation_on_split
 
 
 def generate_markdown_report(
     eval_report: dict,
-    baseline_report: dict = None,
+    baseline_report: Optional[dict] = None,
     output_path: str = "evaluation/evaluation_report.md",
 ) -> str:
-    """Generate a clean, structured Phase 6 Evaluation Markdown Report with per-class/per-language sample sizes."""
+    """Generate a clean, structured Phase 6 Evaluation Markdown Report with per-class/per-language sample sizes,
+
+    cross-language matrix, and hard-case behavior analysis.
+    """
     ov = eval_report["overall_metrics"]
     pc = eval_report["per_class_metrics"]
     pl = eval_report["per_language_metrics"]
     cal = eval_report["confidence_calibration"]
     clm = eval_report.get("cross_language_matrix", {})
+    hc = eval_report.get("hard_case_analysis", {})
 
     md = []
     md.append("# Phase 6 — Model Evaluation & Benchmark Report")
     md.append("")
-    md.append(f"**Date:** {datetime.utcnow().isoformat()}Z  ")
+    md.append(f"**Generated:** {datetime.utcnow().isoformat()}Z  ")
     md.append(f"**Evaluation Corpus:** Held-out Test Split (`data/splits/test.json`)  ")
-    md.append(f"**Test Set Composition:** {eval_report['total_test_samples']} Records (100% Real Code, 0 Mutations, 0 Data Leakage)")
+    md.append(f"**Test Set Composition:** {eval_report['total_test_samples']} Records (100% Real Code, 0 Synthetic Mutations, 0 Data Leakage)")
     md.append("")
     md.append("---")
     md.append("")
@@ -62,7 +68,7 @@ def generate_markdown_report(
     md.append("## 2. Per-Class Performance Breakdown")
     md.append("")
     md.append("> [!NOTE]")
-    md.append("> Per-class sample sizes ($N$) are explicitly listed. Small test slices ($N < 30$) reflect natural real-CVE distributions and are flagged accordingly.")
+    md.append("> Per-class sample sizes ($N$) are explicitly listed. Small test slices ($N < 30$) reflect natural real-world distribution and are highlighted accordingly.")
     md.append("")
     md.append("| Vulnerability Class | Ground Truth $N$ | Predicted $N$ | Precision | Recall | FPR | FNR | F1-Score |")
     md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
@@ -101,10 +107,43 @@ def generate_markdown_report(
     md.append("")
     md.append("---")
     md.append("")
-    md.append("## 4. Confidence Calibration & Reliability Diagram (ECE)")
+    md.append("## 4. Cross-Language CWE Matrix (Precision / Recall / $N$)")
+    md.append("")
+    md.append("| Vulnerability Class | Go | Java | JavaScript | PHP | Python | TypeScript |")
+    md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+
+    for cls_name, lang_dict in clm.items():
+        row = [f"**`{cls_name}`**"]
+        for lang in ["go", "java", "javascript", "php", "python", "typescript"]:
+            info = lang_dict.get(lang, {})
+            s_size = info.get("sample_size", 0)
+            rec = info.get("recall")
+            prec = info.get("precision")
+            if s_size == 0 or rec is None:
+                row.append("— ($N=0$)")
+            else:
+                row.append(f"P: {prec*100:.0f}% / R: {rec*100:.0f}% ($N={s_size}$)")
+        md.append("| " + " | ".join(row) + " |")
+
+    md.append("")
+    md.append("---")
+    md.append("")
+    md.append("## 5. Hard-Case Behavior Analysis")
+    md.append("")
+    if hc:
+        sub = hc.get("subtle_vulnerable_cases", {})
+        sus = hc.get("suspicious_clean_cases", {})
+        md.append("| Hard-Case Category | Sample Size ($N$) | Correct | Errors (FP / FN) | Success Rate | Error Rate |")
+        md.append("| :--- | :--- | :--- | :--- | :--- | :--- |")
+        md.append(f"| **Subtle Vulnerabilities (Looks Clean)** | {sub.get('sample_size', 0)} | {sub.get('detected_count', 0)} | {sub.get('missed_count', 0)} FN | **{sub.get('detection_rate', 0.0)*100:.1f}%** | {sub.get('false_negative_rate', 0.0)*100:.1f}% FNR |")
+        md.append(f"| **Suspicious-Looking Clean Code** | {sus.get('sample_size', 0)} | {sus.get('correct_clean_count', 0)} | {sus.get('false_positive_count', 0)} FP | **{sus.get('specificity', 0.0)*100:.1f}%** | {sus.get('false_positive_rate', 0.0)*100:.1f}% FPR |")
+    md.append("")
+    md.append("---")
+    md.append("")
+    md.append("## 6. Confidence Calibration & Reliability Diagram (ECE)")
     md.append("")
     md.append(f"**Expected Calibration Error (ECE):** **`{cal['expected_calibration_error']:.4f}`**  ")
-    md.append(f"**Overconfident Error Count ($P \\ge 0.85$ on mistake):** **`{cal['overconfident_error_count']}`**")
+    md.append(f"**Overconfident Error Count ($P \\ge 0.85$ on incorrect prediction):** **`{cal['overconfident_error_count']}`**")
     md.append("")
     md.append("| Confidence Bin Range | Sample Count ($N$) | Avg Predicted Conf | Expected Acc | Actual Accuracy | Calibration Gap |")
     md.append("| :--- | :--- | :--- | :--- | :--- | :--- |")
@@ -117,26 +156,6 @@ def generate_markdown_report(
         act_a = f"{b['actual_accuracy']*100:.1f}%"
         gap = f"{b['calibration_gap']*100:.1f}%"
         md.append(f"| `{c_range}` | {cnt} | {avg_c} | {exp_a} | {act_a} | {gap} |")
-
-    md.append("")
-    md.append("---")
-    md.append("")
-    md.append("## 5. Cross-Language CWE Matrix (Detection Rate)")
-    md.append("")
-    md.append("| Vulnerability Class | Go | Java | JavaScript | PHP | Python | TypeScript |")
-    md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
-
-    for cls_name, lang_dict in clm.items():
-        row = [f"**`{cls_name}`**"]
-        for lang in ["go", "java", "javascript", "php", "python", "typescript"]:
-            info = lang_dict.get(lang, {})
-            s_size = info.get("sample_size", 0)
-            det_rate = info.get("detection_rate")
-            if s_size == 0 or det_rate is None:
-                row.append("— ($N=0$)")
-            else:
-                row.append(f"{det_rate*100:.1f}% ($N={s_size}$)")
-        md.append("| " + " | ".join(row) + " |")
 
     md.append("")
     content = "\n".join(md)
@@ -156,6 +175,7 @@ def main():
     parser.add_argument("--adapter_path", type=str, default="checkpoints/final_adapter", help="Path to fine-tuned LoRA adapter")
     parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-0.5B-Instruct", help="Base model identifier")
     parser.add_argument("--output_dir", type=str, default="evaluation/results", help="Directory to save evaluation results")
+    parser.add_argument("--batch_size", type=int, default=8, help="Inference batch size")
     parser.add_argument("--run_baseline", action="store_true", help="Also evaluate zero-shot base model for comparison")
     parser.add_argument("--device", type=str, default=None, help="Device ('cuda' or 'cpu')")
     args = parser.parse_args()
@@ -175,7 +195,9 @@ def main():
         adapter_path=args.adapter_path,
         device=args.device,
     )
-    ft_report, ft_predictions = run_evaluation_on_split(ft_model, ft_tokenizer, test_records)
+    ft_report, ft_predictions = run_evaluation_on_split(
+        ft_model, ft_tokenizer, test_records, batch_size=args.batch_size
+    )
 
     # Save fine-tuned results
     ft_pred_path = os.path.join(args.output_dir, "test_predictions_finetuned.jsonl")
@@ -187,7 +209,6 @@ def main():
     base_report = None
     if args.run_baseline:
         print(f"\n=== Evaluating Base Model Baseline ({args.model_id}) ===")
-        # Unload FT model to free memory
         del ft_model
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -197,7 +218,9 @@ def main():
             adapter_path=None,
             device=args.device,
         )
-        base_report, base_predictions = run_evaluation_on_split(base_model, base_tokenizer, test_records)
+        base_report, base_predictions = run_evaluation_on_split(
+            base_model, base_tokenizer, test_records, batch_size=args.batch_size
+        )
 
         base_pred_path = os.path.join(args.output_dir, "test_predictions_baseline.jsonl")
         with open(base_pred_path, "w", encoding="utf-8") as f:

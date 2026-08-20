@@ -22,6 +22,7 @@ from evaluation.metrics import (
     compute_per_language_metrics,
     compute_cross_language_matrix,
     compute_confidence_calibration,
+    compute_hard_case_analysis,
 )
 
 
@@ -55,16 +56,15 @@ def extract_json_from_response(response_text: str) -> Dict[str, Any]:
     confidence = 0.50
     explanation = "Parsed via heuristic fallback."
 
-    if re.search(r'"is_vulnerable"\s*:\s*true', response_text, re.IGNORECASE):
+    if re.search(r'"is_vulnerable"\s*:\s*true', response_text, re.IGNORECASE) or re.search(r'"vulnerable"\s*:\s*true', response_text, re.IGNORECASE):
         is_vuln = True
-    elif re.search(r'"is_vulnerable"\s*:\s*false', response_text, re.IGNORECASE):
+    elif re.search(r'"is_vulnerable"\s*:\s*false', response_text, re.IGNORECASE) or re.search(r'"vulnerable"\s*:\s*false', response_text, re.IGNORECASE):
         is_vuln = False
 
-    class_match = re.search(r'"vulnerability_class"\s*:\s*"([^"]+)"', response_text, re.IGNORECASE)
+    class_match = re.search(r'"(?:vulnerability_class|vuln_class)"\s*:\s*"([^"]+)"', response_text, re.IGNORECASE)
     if class_match:
         vuln_class = class_match.group(1)
     elif is_vuln:
-        # Check mentions of common CWEs
         if "auth_bypass" in response_text or "CWE-287" in response_text:
             vuln_class = "auth_bypass"
         elif "missing_authz_check" in response_text or "CWE-862" in response_text:
@@ -105,6 +105,7 @@ def load_model_for_evaluation(
         adapter_path if (adapter_path and os.path.exists(adapter_path)) else model_id,
         trust_remote_code=True,
     )
+    tokenizer.padding_side = "left"  # Crucial for batched causal decoder generation
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -132,75 +133,82 @@ def run_evaluation_on_split(
     model: Any,
     tokenizer: Any,
     test_records: List[Dict[str, Any]],
-    batch_size: int = 1,
+    batch_size: int = 8,
     max_new_tokens: int = 256,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Run sequential greedy inference on test records and compute evaluation metrics."""
+    """Run batched greedy inference on test records and compute evaluation metrics."""
     device = next(model.parameters()).device
     evaluated_items: List[Dict[str, Any]] = []
 
-    print(f"[INFO] Running evaluation on {len(test_records)} test samples...")
+    print(f"[INFO] Running batched evaluation on {len(test_records)} samples (batch_size={batch_size}, device={device})...", flush=True)
     start_time = time.time()
 
-    for idx, record in enumerate(test_records):
-        code_unit = record.get("code_unit", "")
-        language = record.get("language", "generic")
-        user_prompt = format_user_prompt(code_unit, language)
+    for i in range(0, len(test_records), batch_size):
+        batch_records = test_records[i : i + batch_size]
+        prompts = []
 
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
+        for record in batch_records:
+            code_unit = record.get("code_unit") or record.get("code") or ""
+            language = record.get("language", "generic")
+            user_prompt = format_user_prompt(code_unit, language)
 
-        if hasattr(tokenizer, "apply_chat_template"):
-            input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        else:
-            input_text = f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n"
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ]
 
-        inputs = tokenizer(input_text, return_tensors="pt").to(device)
+            if hasattr(tokenizer, "apply_chat_template"):
+                prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            else:
+                prompt_text = f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n"
+            prompts.append(prompt_text)
+
+        inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True, max_length=1024).to(device)
 
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
-                do_sample=False,  # deterministic greedy decoding for reproducible evaluation
+                do_sample=False,  # deterministic greedy decoding for reproducible benchmarks
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
             )
 
-        # Extract only generated response tokens
         input_len = inputs["input_ids"].shape[1]
-        gen_tokens = outputs[0][input_len:]
-        response_text = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
+        for j, record in enumerate(batch_records):
+            gen_tokens = outputs[j][input_len:]
+            response_text = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
 
-        parsed = extract_json_from_response(response_text)
+            parsed = extract_json_from_response(response_text)
 
-        true_is_vuln = bool(record.get("is_vulnerable", False))
-        true_vuln_class = record.get("vuln_class", "none") if true_is_vuln else "none"
+            code_unit = record.get("code_unit") or record.get("code") or ""
+            language = record.get("language", "generic")
+            true_is_vuln = bool(record.get("is_vulnerable", False))
+            true_vuln_class = record.get("vuln_class", "none") if true_is_vuln else "none"
 
-        pred_is_vuln = bool(parsed.get("is_vulnerable", False))
-        pred_vuln_class = parsed.get("vulnerability_class", "none")
-        pred_confidence = float(parsed.get("confidence", 0.85 if pred_is_vuln else 0.05))
+            pred_is_vuln = bool(parsed.get("is_vulnerable", False))
+            pred_vuln_class = parsed.get("vulnerability_class", "none")
+            pred_confidence = float(parsed.get("confidence", 0.85 if pred_is_vuln else 0.05))
 
-        evaluated_item = {
-            "record_id": record.get("id", f"rec_{idx}"),
-            "language": language,
-            "code_unit": code_unit,
-            "true_is_vulnerable": true_is_vuln,
-            "true_vuln_class": true_vuln_class,
-            "pred_is_vulnerable": pred_is_vuln,
-            "pred_vuln_class": pred_vuln_class,
-            "pred_confidence": pred_confidence,
-            "pred_explanation": parsed.get("explanation", ""),
-            "raw_response": response_text,
-            "is_correct_binary": (pred_is_vuln == true_is_vuln),
-            "is_correct_class": (pred_vuln_class == true_vuln_class),
-        }
-        evaluated_items.append(evaluated_item)
+            evaluated_item = {
+                "record_id": record.get("id", f"rec_{i+j}"),
+                "language": language,
+                "code_unit": code_unit,
+                "true_is_vulnerable": true_is_vuln,
+                "true_vuln_class": true_vuln_class,
+                "pred_is_vulnerable": pred_is_vuln,
+                "pred_vuln_class": pred_vuln_class,
+                "pred_confidence": pred_confidence,
+                "pred_explanation": parsed.get("explanation", ""),
+                "raw_response": response_text,
+                "is_correct_binary": (pred_is_vuln == true_is_vuln),
+                "is_correct_class": (pred_vuln_class == true_vuln_class),
+            }
+            evaluated_items.append(evaluated_item)
 
-        if (idx + 1) % 25 == 0 or (idx + 1) == len(test_records):
-            elapsed = time.time() - start_time
-            print(f"[{idx+1}/{len(test_records)}] Processed ({elapsed:.1f}s, {(idx+1)/elapsed:.2f} samples/s)")
+        processed_count = min(i + batch_size, len(test_records))
+        elapsed = time.time() - start_time
+        print(f"[{processed_count}/{len(test_records)}] Processed ({elapsed:.1f}s, {processed_count/elapsed:.2f} samples/s)", flush=True)
 
     # Compute comprehensive metric breakdown
     y_true = [r["true_is_vulnerable"] for r in evaluated_items]
@@ -210,6 +218,7 @@ def run_evaluation_on_split(
     per_class_metrics = compute_per_class_metrics(evaluated_items)
     per_language_metrics = compute_per_language_metrics(evaluated_items)
     cross_lang_matrix = compute_cross_language_matrix(evaluated_items)
+    hard_case_metrics = compute_hard_case_analysis(evaluated_items)
     calibration_metrics = compute_confidence_calibration(evaluated_items, num_bins=5)
 
     evaluation_report = {
@@ -218,6 +227,7 @@ def run_evaluation_on_split(
         "per_class_metrics": per_class_metrics,
         "per_language_metrics": per_language_metrics,
         "cross_language_matrix": cross_lang_matrix,
+        "hard_case_analysis": hard_case_metrics,
         "confidence_calibration": calibration_metrics,
     }
 

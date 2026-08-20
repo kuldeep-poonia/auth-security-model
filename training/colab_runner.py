@@ -59,8 +59,8 @@ def run_training_in_colab(args):
         "--gradient_accumulation_steps", str(args.gradient_accumulation_steps),
         "--learning_rate", str(args.learning_rate),
         "--epochs", str(args.epochs),
-        "--save_steps", "50",
-        "--eval_steps", "50",
+        "--save_steps", str(args.save_steps),
+        "--eval_steps", str(args.eval_steps),
     ]
 
     if args.resume:
@@ -79,7 +79,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=8)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=2)
+    parser.add_argument("--save_steps", type=int, default=25)
+    parser.add_argument("--eval_steps", type=int, default=25)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--smoke_test", action="store_true")
     args = parser.parse_args()

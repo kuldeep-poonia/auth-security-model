@@ -176,7 +176,7 @@ def train(args):
     lora_config = LoraConfig(
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
-        lora_dropout=0.05,
+        lora_dropout=0.10,
         target_modules=DEFAULT_TARGET_MODULES,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
@@ -194,12 +194,16 @@ def train(args):
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
         "learning_rate": args.learning_rate,
         "lr_scheduler_type": "cosine",
+        "weight_decay": 0.01,
         "num_train_epochs": args.epochs if not args.smoke_test else 1,
         "max_steps": args.max_steps if (args.max_steps and args.max_steps > 0) else -1,
         "logging_steps": 1 if args.smoke_test else 10,
         "save_strategy": "steps",
         "save_steps": args.save_steps,
-        "save_total_limit": 3,
+        "save_total_limit": 5,
+        "load_best_model_at_end": True if (val_dataset and not args.smoke_test) else False,
+        "metric_for_best_model": "eval_loss",
+        "greater_is_better": False,
         "fp16": torch.cuda.is_available(),
         "bf16": False,
         "gradient_checkpointing": True if torch.cuda.is_available() else False,
@@ -229,12 +233,18 @@ def train(args):
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True)
 
+    callbacks = []
+    if val_dataset and not args.smoke_test:
+        from transformers import EarlyStoppingCallback
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=2, early_stopping_threshold=0.005))
+
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         data_collator=data_collator,
+        callbacks=callbacks,
     )
 
     latest_ckpt = find_latest_checkpoint(target_dir) if args.resume else None
@@ -246,14 +256,22 @@ def train(args):
         print("[INFO] Starting training from scratch...")
         train_result = trainer.train()
 
-    # Save final model adapter and tokenizer
+    # Save final model adapter and tokenizer (Trainer reloads best model when load_best_model_at_end=True)
+    best_ckpt = getattr(trainer.state, "best_model_checkpoint", None)
+    best_metric = getattr(trainer.state, "best_metric", None)
+    if best_ckpt:
+        print(f"[OK] Best model loaded from: {best_ckpt} (best eval_loss: {best_metric:.4f})")
+
     final_adapter_dir = os.path.join(target_dir, "final_adapter")
     trainer.save_model(final_adapter_dir)
     tokenizer.save_pretrained(final_adapter_dir)
 
     metrics = train_result.metrics
+    if best_ckpt:
+        metrics["best_model_checkpoint"] = best_ckpt
+        metrics["best_eval_loss"] = best_metric
     logger.log_event("train_complete", metrics)
-    print(f"[OK] Fine-tuning finished! Final adapter saved to {final_adapter_dir}")
+    print(f"[OK] Fine-tuning finished! Best adapter saved to {final_adapter_dir}")
     return metrics
 
 
@@ -315,7 +333,7 @@ def parse_args():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=3,
+        default=2,
         help="Number of training epochs",
     )
     parser.add_argument(
@@ -327,13 +345,13 @@ def parse_args():
     parser.add_argument(
         "--save_steps",
         type=int,
-        default=50,
+        default=25,
         help="Checkpoint save interval in steps",
     )
     parser.add_argument(
         "--eval_steps",
         type=int,
-        default=50,
+        default=25,
         help="Evaluation interval in steps",
     )
     parser.add_argument(

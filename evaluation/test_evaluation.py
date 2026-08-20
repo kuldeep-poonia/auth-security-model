@@ -94,6 +94,14 @@ def test_extract_json_from_response_code_fence():
     assert parsed["confidence"] == 0.95
 
 
+def test_extract_json_from_response_trained_schema():
+    text = '{\n  "vulnerable": true,\n  "vuln_class": "incorrect_authz",\n  "confidence": 0.94,\n  "explanation": "Missing role verification."\n}'
+    parsed = extract_json_from_response(text)
+    assert parsed["is_vulnerable"] is True
+    assert parsed["vulnerability_class"] == "incorrect_authz"
+    assert parsed["confidence"] == 0.94
+
+
 def test_extract_json_from_response_fallback_regex():
     text = 'Analysis indicates "is_vulnerable": false, "vulnerability_class": "none", "confidence": 0.05'
     parsed = extract_json_from_response(text)

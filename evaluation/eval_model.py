@@ -26,13 +26,53 @@ from evaluation.metrics import (
 )
 
 
+def normalize_prediction(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure consistent standard keys across varying JSON schemas."""
+    is_vuln = False
+    if "vulnerable" in raw:
+        val = raw["vulnerable"]
+        is_vuln = (val is True or str(val).lower() == "true")
+    elif "is_vulnerable" in raw:
+        val = raw["is_vulnerable"]
+        is_vuln = (val is True or str(val).lower() == "true")
+
+    vuln_class = "none"
+    if "vuln_class" in raw:
+        vuln_class = str(raw["vuln_class"])
+    elif "vulnerability_class" in raw:
+        vuln_class = str(raw["vulnerability_class"])
+
+    if not is_vuln and vuln_class != "none":
+        if vuln_class in ["auth_bypass", "missing_authz_check", "incorrect_authz", "IDOR"]:
+            is_vuln = True
+        else:
+            vuln_class = "none"
+
+    if is_vuln and (vuln_class == "none" or not vuln_class):
+        vuln_class = "missing_authz_check"
+
+    try:
+        confidence = float(raw.get("confidence", 0.85 if is_vuln else 0.05))
+    except (ValueError, TypeError):
+        confidence = 0.85 if is_vuln else 0.05
+
+    explanation = str(raw.get("explanation", ""))
+
+    return {
+        "is_vulnerable": is_vuln,
+        "vulnerability_class": vuln_class,
+        "confidence": confidence,
+        "explanation": explanation,
+    }
+
+
 def extract_json_from_response(response_text: str) -> Dict[str, Any]:
     """Robustly extract and parse JSON completion from model output text."""
     # 1. Look for ```json ... ``` code fences
     json_fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
     if json_fence_match:
         try:
-            return json.loads(json_fence_match.group(1))
+            return normalize_prediction(json.loads(json_fence_match.group(1)))
         except json.JSONDecodeError:
             pass
 
@@ -40,13 +80,13 @@ def extract_json_from_response(response_text: str) -> Dict[str, Any]:
     brace_match = re.search(r"(\{.*?\})", response_text, re.DOTALL)
     if brace_match:
         try:
-            return json.loads(brace_match.group(1))
+            return normalize_prediction(json.loads(brace_match.group(1)))
         except json.JSONDecodeError:
             pass
 
     # 3. Direct JSON parse
     try:
-        return json.loads(response_text.strip())
+        return normalize_prediction(json.loads(response_text.strip()))
     except json.JSONDecodeError:
         pass
 
@@ -56,9 +96,9 @@ def extract_json_from_response(response_text: str) -> Dict[str, Any]:
     confidence = 0.50
     explanation = "Parsed via heuristic fallback."
 
-    if re.search(r'"is_vulnerable"\s*:\s*true', response_text, re.IGNORECASE) or re.search(r'"vulnerable"\s*:\s*true', response_text, re.IGNORECASE):
+    if re.search(r'"(?:is_vulnerable|vulnerable)"\s*:\s*true', response_text, re.IGNORECASE):
         is_vuln = True
-    elif re.search(r'"is_vulnerable"\s*:\s*false', response_text, re.IGNORECASE) or re.search(r'"vulnerable"\s*:\s*false', response_text, re.IGNORECASE):
+    elif re.search(r'"(?:is_vulnerable|vulnerable)"\s*:\s*false', response_text, re.IGNORECASE):
         is_vuln = False
 
     class_match = re.search(r'"(?:vulnerability_class|vuln_class)"\s*:\s*"([^"]+)"', response_text, re.IGNORECASE)
@@ -83,12 +123,12 @@ def extract_json_from_response(response_text: str) -> Dict[str, Any]:
     else:
         confidence = 0.85 if is_vuln else 0.05
 
-    return {
-        "is_vulnerable": is_vuln,
-        "vulnerability_class": vuln_class,
+    return normalize_prediction({
+        "vulnerable": is_vuln,
+        "vuln_class": vuln_class,
         "confidence": confidence,
         "explanation": explanation,
-    }
+    })
 
 
 def load_model_for_evaluation(

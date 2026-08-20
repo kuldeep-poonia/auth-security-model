@@ -77,8 +77,8 @@ def run_training_in_colab(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Colab Fine-Tuning Runner")
     parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-0.5B-Instruct")
-    parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=16)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--save_steps", type=int, default=50)

@@ -131,6 +131,26 @@ class SecurityDataset(Dataset):
         return self.examples[idx]
 
 
+class SecurityTrainer(Trainer):
+    """Custom Trainer implementing memory-fused FP16 cross-entropy loss to bypass Hugging Face's 10GB FP32 logits upcasting bug."""
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels") if "labels" in inputs else None
+        outputs = model(**inputs)
+
+        if labels is None:
+            return (outputs.loss, outputs) if return_outputs else outputs.loss
+
+        logits = outputs.logits
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
+        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+        return (loss, outputs) if return_outputs else loss
+
+
 def train(args):
     import gc
     gc.collect()
@@ -245,26 +265,6 @@ def train(args):
     training_args = TrainingArguments(**filtered_training_kwargs)
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True)
-
-class SecurityTrainer(Trainer):
-    """Custom Trainer implementing memory-fused FP16 cross-entropy loss to bypass Hugging Face's 10GB FP32 logits upcasting bug."""
-
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        labels = inputs.pop("labels") if "labels" in inputs else None
-        outputs = model(**inputs)
-
-        if labels is None:
-            return (outputs.loss, outputs) if return_outputs else outputs.loss
-
-        logits = outputs.logits
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous()
-
-        loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
-        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-
-        return (loss, outputs) if return_outputs else loss
-
 
     callbacks = []
     if val_dataset and not args.smoke_test:

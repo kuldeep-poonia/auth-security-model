@@ -22,6 +22,9 @@ def setup_colab_environment(drive_base_dir: str = "/content/drive/MyDrive/auth_s
         os.makedirs(drive_base_dir, exist_ok=True)
 
     print("=== Step 2: Installing/Verifying Dependencies ===")
+    # Remove torchvision to prevent C++ binding mismatch (not needed for code/text LLM)
+    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "torchvision"], check=False)
+
     cmd = [
         sys.executable, "-m", "pip", "install", "--quiet", "--upgrade",
         "transformers>=4.40.0", "peft>=0.10.0", "datasets>=2.18.0",

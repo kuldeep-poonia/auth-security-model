@@ -88,7 +88,17 @@ def format_assistant_response(record: Dict[str, Any]) -> str:
         vuln_class = "none" if not is_vuln else "missing_authz_check"
 
     confidence = derive_calibrated_confidence(record)
-    explanation = record.get("explanation", "Clean code." if not is_vuln else "Vulnerability detected.")
+    
+    raw_explanation = str(record.get("explanation", "")).strip()
+    if not raw_explanation:
+        explanation = "No vulnerability detected in authentication/authorization logic." if not is_vuln else "Authentication or authorization vulnerability detected."
+    else:
+        # Extract first concise paragraph / sentence and cap to max 180 chars
+        first_chunk = raw_explanation.split("\n\n")[0].split("\n*")[0].replace("\n", " ").strip()
+        if len(first_chunk) > 180:
+            explanation = first_chunk[:177] + "..."
+        else:
+            explanation = first_chunk
 
     lines = record.get("code", "").splitlines()
     line_count = max(1, len(lines))

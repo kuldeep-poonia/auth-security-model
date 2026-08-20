@@ -75,11 +75,13 @@ def find_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
 class SecurityDataset(Dataset):
     """PyTorch Dataset that formats multi-turn chat records with prompt masking (-100 labels).
 
-    Guarantees the assistant JSON completion is NEVER truncated, ensuring 100% of samples
-    have valid supervised tokens and non-NaN loss.
+    Guarantees:
+    1. len(input_ids) <= max_length (strictly enforced for every sample).
+    2. assistant JSON tokens are preserved and capped to max 128 tokens.
+    3. 100% of samples have valid supervised tokens (0 NaNs).
     """
 
-    def __init__(self, formatted_items: List[Dict[str, Any]], tokenizer: Any, max_length: int = 1024):
+    def __init__(self, formatted_items: List[Dict[str, Any]], tokenizer: Any, max_length: int = 384):
         self.examples = []
         for item in formatted_items:
             messages = item["messages"]
@@ -99,24 +101,29 @@ class SecurityDataset(Dataset):
 
             assistant_text = f"{assistant_msg}<|im_end|>\n"
 
-            # Tokenize assistant response first to know its exact token length
-            assistant_tokens = tokenizer(assistant_text, add_special_tokens=False)["input_ids"]
+            # Tokenize assistant response capped to max 128 tokens
+            assistant_tokens = tokenizer(assistant_text, truncation=True, max_length=128, add_special_tokens=False)["input_ids"]
             if not assistant_tokens:
-                assistant_tokens = tokenizer(assistant_msg, add_special_tokens=False)["input_ids"]
+                assistant_tokens = tokenizer(assistant_msg, truncation=True, max_length=128, add_special_tokens=False)["input_ids"]
             assistant_len = len(assistant_tokens)
 
-            # Max allowed tokens for context to guarantee assistant response is fully preserved
-            max_context_len = max(max_length - assistant_len, 64)
+            # Max allowed tokens for context
+            max_context_len = max(max_length - assistant_len, 32)
 
             # Tokenize context with truncation
             context_tokens = tokenizer(context_text, truncation=True, max_length=max_context_len, add_special_tokens=False)["input_ids"]
 
-            input_ids = context_tokens + assistant_tokens
+            # Combined sequence strictly capped at max_length
+            input_ids = (context_tokens + assistant_tokens)[:max_length]
             context_len = len(context_tokens)
 
             # Mask context tokens with -100, ensure assistant tokens have real label IDs
-            labels = [-100] * context_len + list(assistant_tokens)
+            labels = ([-100] * context_len + list(assistant_tokens))[:len(input_ids)]
             attention_mask = [1] * len(input_ids)
+
+            # Strict validation
+            assert len(input_ids) == len(labels) == len(attention_mask) <= max_length
+            assert any(l != -100 for l in labels), "Record must have supervised labels"
 
             self.examples.append({
                 "input_ids": input_ids,

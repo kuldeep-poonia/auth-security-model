@@ -8,18 +8,40 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import argparse
+import gc
 import subprocess
 import sys
 
 
-def setup_kaggle_environment():
-    """Verify GPU availability and install pinned dependencies for Kaggle environment."""
-    print("=== Step 1: Checking Kaggle GPU Environment ===")
+def get_repo_root():
+    """Resolve the absolute root directory of this repository and snap os.chdir to it."""
+    # This file is at <repo_root>/training/kaggle_runner.py
+    current_file = os.path.abspath(__file__)
+    repo_root = os.path.dirname(os.path.dirname(current_file))
+    os.chdir(repo_root)
+    print(f"[INFO] Fixed Working Directory snapped to: {repo_root}")
+    return repo_root
+
+
+def setup_kaggle_environment(repo_root: str):
+    """Verify GPU availability, clear stale VRAM, and install pinned dependencies."""
+    print("=== Step 1: Checking GPU & Clearing Stale VRAM ===")
     import torch
+    gc.collect()
     if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        try:
+            torch.cuda.ipc_collect()
+        except Exception:
+            pass
+        free_bytes, total_bytes = torch.cuda.mem_get_info()
+        free_gb = free_bytes / (1024 ** 3)
+        total_gb = total_bytes / (1024 ** 3)
         gpu_name = torch.cuda.get_device_name(0)
-        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-        print(f"[OK] CUDA GPU Detected: {gpu_name} ({vram_gb:.2f} GB VRAM)")
+        print(f"[OK] CUDA GPU Detected: {gpu_name}")
+        print(f"[OK] VRAM Status: {free_gb:.2f} GB free / {total_gb:.2f} GB total")
+        if free_gb < 10.0:
+            print("[WARN] Less than 10 GB VRAM free! Please restart Kaggle kernel (Session -> Restart Kernel) to clear stale GPU memory.")
     else:
         print("[WARN] No GPU detected! Please ensure GPU accelerator (T4 or P100) is turned ON in Kaggle notebook settings.")
 
@@ -35,20 +57,26 @@ def setup_kaggle_environment():
     subprocess.check_call(cmd)
     print("[OK] ML dependencies installed.")
 
-    os.makedirs("checkpoints", exist_ok=True)
-    return "checkpoints"
+    target_dir = os.path.join(repo_root, "checkpoints")
+    os.makedirs(target_dir, exist_ok=True)
+    return target_dir
 
 
 def run_training_in_kaggle(args):
-    target_dir = setup_kaggle_environment()
+    repo_root = get_repo_root()
+    target_dir = setup_kaggle_environment(repo_root)
 
     print("=== Step 3: Launching LoRA Fine-Tuning (Native FP16, Prompt Masking) ===")
+    train_script = os.path.join(repo_root, "training", "train_lora.py")
+    train_file = os.path.join(repo_root, "data", "splits", "train.json")
+    val_file = os.path.join(repo_root, "data", "splits", "val.json")
+
     cmd = [
         sys.executable,
-        "training/train_lora.py",
+        train_script,
         "--model_id", args.model_id,
-        "--train_file", "data/splits/train.json",
-        "--val_file", "data/splits/val.json",
+        "--train_file", train_file,
+        "--val_file", val_file,
         "--output_dir", target_dir,
         "--drive_dir", target_dir,
         "--batch_size", str(args.batch_size),
@@ -66,7 +94,7 @@ def run_training_in_kaggle(args):
         cmd.append("--smoke_test")
 
     print(f"[INFO] Executing: {' '.join(cmd)}")
-    subprocess.check_call(cmd)
+    subprocess.check_call(cmd, cwd=repo_root)
     print("\n=== Fine-Tuning Completed Successfully on Kaggle! ===")
 
 

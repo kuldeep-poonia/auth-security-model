@@ -1,7 +1,9 @@
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import argparse
 import glob
 import json
-import os
 import re
 import sys
 from typing import Any, Dict, List, Optional
@@ -335,13 +337,13 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=2,
-        help="Batch size per device",
+        default=1,
+        help="Per-device batch size for training",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
-        default=8,
+        default=16,
         help="Number of gradient accumulation steps",
     )
     parser.add_argument(
@@ -377,7 +379,7 @@ def parse_args():
     parser.add_argument(
         "--max_length",
         type=int,
-        default=1024,
+        default=768,
         help="Maximum tokenized sequence length",
     )
     parser.add_argument(

@@ -184,6 +184,7 @@ def train(args):
             device_map="auto",
             trust_remote_code=True,
         )
+        model.config.use_cache = False  # CRITICAL for training with gradient checkpointing
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
         print(f"[INFO] Loading base model on CPU: {args.model_id}")
@@ -192,6 +193,7 @@ def train(args):
             torch_dtype=torch.float32,
             trust_remote_code=True,
         )
+        model.config.use_cache = False
 
     # Configure LoRA
     print(f"[INFO] Setting up LoRA (r={args.lora_r}, alpha={args.lora_alpha}, target_modules={DEFAULT_TARGET_MODULES})")
@@ -211,8 +213,9 @@ def train(args):
     sig = inspect.signature(TrainingArguments.__init__).parameters
     training_kwargs = {
         "output_dir": target_dir,
+        "optim": "paged_adamw_8bit" if ("optim" in sig and torch.cuda.is_available()) else "adamw_torch",
         "per_device_train_batch_size": args.batch_size,
-        "per_device_eval_batch_size": 2,
+        "per_device_eval_batch_size": 1,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
         "learning_rate": args.learning_rate,
         "lr_scheduler_type": "cosine",

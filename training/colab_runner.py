@@ -10,16 +10,14 @@ import subprocess
 import sys
 
 
-def setup_colab_environment(drive_base_dir: str = "/content/drive/MyDrive/auth_sec_model"):
-    """Mount Google Drive, install pinned dependencies, and prepare paths."""
-    print("=== Step 1: Mounting Google Drive ===")
-    try:
-        from google.colab import drive
-        drive.mount("/content/drive")
-        print(f"[OK] Google Drive mounted. Target checkpoint folder: {drive_base_dir}")
+def setup_colab_environment(drive_base_dir: str = "/content/drive/MyDrive/auth_sec_model/checkpoints"):
+    """Verify Drive mount, install pinned dependencies, and prepare persistent paths."""
+    print("=== Step 1: Checking Google Drive Mount ===")
+    if os.path.exists("/content/drive"):
+        print(f"[OK] Google Drive detected. Target checkpoints directory: {drive_base_dir}")
         os.makedirs(drive_base_dir, exist_ok=True)
-    except ImportError:
-        print("[WARN] google.colab not available. Running in standalone local mode.")
+    else:
+        print("[INFO] Google Drive not detected at /content/drive. Storing checkpoints locally in 'checkpoints/'.")
         drive_base_dir = "checkpoints"
         os.makedirs(drive_base_dir, exist_ok=True)
 

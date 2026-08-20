@@ -242,10 +242,12 @@ def train(args):
         "fp16": torch.cuda.is_available(),
         "bf16": False,
         "gradient_checkpointing": True if torch.cuda.is_available() else False,
+        "gradient_checkpointing_kwargs": {"use_reentrant": False} if ("gradient_checkpointing_kwargs" in sig and torch.cuda.is_available()) else None,
         "report_to": "none",
         "dataloader_num_workers": 0,
         "dataloader_pin_memory": torch.cuda.is_available(),
     }
+    training_kwargs = {k: v for k, v in training_kwargs.items() if v is not None}
 
     eval_val = "no" if args.smoke_test else ("steps" if val_dataset else "no")
     if "eval_strategy" in sig:
@@ -348,13 +350,13 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1,
+        default=2,
         help="Batch size per device",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
-        default=16,
+        default=4,
         help="Number of gradient accumulation steps",
     )
     parser.add_argument(
@@ -390,7 +392,7 @@ def parse_args():
     parser.add_argument(
         "--max_length",
         type=int,
-        default=512,
+        default=384,
         help="Maximum tokenized sequence length",
     )
     parser.add_argument(

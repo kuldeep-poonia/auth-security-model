@@ -21,9 +21,9 @@ def setup_colab_environment(drive_base_dir: str = "/content/drive/MyDrive/auth_s
         drive_base_dir = "checkpoints"
         os.makedirs(drive_base_dir, exist_ok=True)
 
-    print("=== Step 2: Cleaning unused multimedia extensions & verifying ML packages ===")
-    # Remove torchvision and torchaudio to prevent C++ binary ABI mismatch (not needed for code/text LLMs)
-    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "torchvision", "torchaudio"], check=False)
+    print("=== Step 2: Cleaning unused conflicting extensions & verifying ML packages ===")
+    # Remove torchvision, torchaudio, and outdated torchao to prevent C++/dispatcher incompatibilities
+    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "torchvision", "torchaudio", "torchao"], check=False)
 
     cmd = [
         sys.executable, "-m", "pip", "install", "--quiet", "--upgrade",

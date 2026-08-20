@@ -20,7 +20,10 @@ def setup_kaggle_environment():
     else:
         print("[WARN] No GPU detected! Please ensure GPU accelerator (T4 or P100) is turned ON in Kaggle notebook settings.")
 
-    print("=== Step 2: Installing & Verifying ML Dependencies ===")
+    print("=== Step 2: Removing incompatible extensions & Installing ML Dependencies ===")
+    # Remove incompatible torchao 0.10.0 and unused media packages to avoid PEFT dispatcher error
+    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "torchao", "torchvision", "torchaudio"], check=False)
+
     cmd = [
         sys.executable, "-m", "pip", "install", "--quiet", "--upgrade",
         "transformers>=4.40.0", "peft>=0.10.0", "datasets>=2.18.0",

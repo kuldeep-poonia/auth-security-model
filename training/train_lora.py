@@ -71,7 +71,11 @@ def find_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
 
 
 class SecurityDataset(Dataset):
-    """PyTorch Dataset that formats multi-turn chat records with prompt masking (-100 labels)."""
+    """PyTorch Dataset that formats multi-turn chat records with prompt masking (-100 labels).
+
+    Guarantees the assistant JSON completion is NEVER truncated, ensuring 100% of samples
+    have valid supervised tokens and non-NaN loss.
+    """
 
     def __init__(self, formatted_items: List[Dict[str, Any]], tokenizer: Any, max_length: int = 1024):
         self.examples = []
@@ -88,22 +92,29 @@ class SecurityDataset(Dataset):
 
             if hasattr(tokenizer, "apply_chat_template"):
                 context_text = tokenizer.apply_chat_template(context_messages, tokenize=False, add_generation_prompt=True)
-                full_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
             else:
                 context_text = f"<|im_start|>system\n{system_msg}<|im_end|>\n<|im_start|>user\n{user_msg}<|im_end|>\n<|im_start|>assistant\n"
-                full_text = f"{context_text}{assistant_msg}<|im_end|>"
 
-            # Tokenize context and full conversation
-            context_tokens = tokenizer(context_text, truncation=True, max_length=max_length, add_special_tokens=False)
-            full_tokens = tokenizer(full_text, truncation=True, max_length=max_length, add_special_tokens=False)
+            assistant_text = f"{assistant_msg}<|im_end|>\n"
 
-            input_ids = full_tokens["input_ids"]
-            attention_mask = full_tokens["attention_mask"]
-            context_len = min(len(context_tokens["input_ids"]), len(input_ids))
+            # Tokenize assistant response first to know its exact token length
+            assistant_tokens = tokenizer(assistant_text, add_special_tokens=False)["input_ids"]
+            if not assistant_tokens:
+                assistant_tokens = tokenizer(assistant_msg, add_special_tokens=False)["input_ids"]
+            assistant_len = len(assistant_tokens)
 
-            # Prompt Masking: set labels to -100 for all system/user prompt tokens
-            # so the loss is computed EXCLUSIVELY on the assistant's JSON classification decision
-            labels = [-100] * context_len + input_ids[context_len:]
+            # Max allowed tokens for context to guarantee assistant response is fully preserved
+            max_context_len = max(max_length - assistant_len, 64)
+
+            # Tokenize context with truncation
+            context_tokens = tokenizer(context_text, truncation=True, max_length=max_context_len, add_special_tokens=False)["input_ids"]
+
+            input_ids = context_tokens + assistant_tokens
+            context_len = len(context_tokens)
+
+            # Mask context tokens with -100, ensure assistant tokens have real label IDs
+            labels = [-100] * context_len + list(assistant_tokens)
+            attention_mask = [1] * len(input_ids)
 
             self.examples.append({
                 "input_ids": input_ids,

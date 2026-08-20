@@ -171,34 +171,18 @@ def train(args):
 
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    # Configure Quantization & Model Loading
-    if torch.cuda.is_available():
-        from transformers import BitsAndBytesConfig
-        from peft import prepare_model_for_kbit_training
+    # Configure Model Loading (0.5B model fits completely in native FP16 in < 1GB VRAM)
+    device_map = "auto" if torch.cuda.is_available() else None
+    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
-        print(f"[INFO] Loading base model with 4-bit QLoRA (BitsAndBytes NF4): {args.model_id}")
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,
-        )
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_id,
-            quantization_config=bnb_config,
-            device_map="auto",
-            trust_remote_code=True,
-        )
-        model.config.use_cache = False  # CRITICAL for training with gradient checkpointing
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-    else:
-        print(f"[INFO] Loading base model on CPU: {args.model_id}")
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_id,
-            torch_dtype=torch.float32,
-            trust_remote_code=True,
-        )
-        model.config.use_cache = False
+    print(f"[INFO] Loading base model in native FP16: {args.model_id} (weight memory: 959 MB)")
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_id,
+        torch_dtype=torch_dtype,
+        device_map=device_map,
+        trust_remote_code=True,
+    )
+    model.config.use_cache = False
 
     # Configure LoRA
     print(f"[INFO] Setting up LoRA (r={args.lora_r}, alpha={args.lora_alpha}, target_modules={DEFAULT_TARGET_MODULES})")
@@ -218,9 +202,8 @@ def train(args):
     sig = inspect.signature(TrainingArguments.__init__).parameters
     training_kwargs = {
         "output_dir": target_dir,
-        "optim": "paged_adamw_8bit" if ("optim" in sig and torch.cuda.is_available()) else "adamw_torch",
         "per_device_train_batch_size": args.batch_size,
-        "per_device_eval_batch_size": 1,
+        "per_device_eval_batch_size": 2,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
         "learning_rate": args.learning_rate,
         "lr_scheduler_type": "cosine",
@@ -236,9 +219,6 @@ def train(args):
         "greater_is_better": False,
         "fp16": torch.cuda.is_available(),
         "bf16": False,
-        "gradient_checkpointing": True if torch.cuda.is_available() else False,
-        "prediction_loss_only": True,
-        "eval_accumulation_steps": 1,
         "report_to": "none",
         "dataloader_num_workers": 0,
         "dataloader_pin_memory": torch.cuda.is_available(),

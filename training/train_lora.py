@@ -183,8 +183,6 @@ def train(args):
         trust_remote_code=True,
     )
     model.config.use_cache = False
-    if torch.cuda.is_available():
-        model.enable_input_require_grads()
 
     # Configure LoRA
     print(f"[INFO] Setting up LoRA (r={args.lora_r}, alpha={args.lora_alpha}, target_modules={DEFAULT_TARGET_MODULES})")
@@ -197,6 +195,17 @@ def train(args):
         task_type=TaskType.CAUSAL_LM,
     )
     model = get_peft_model(model, lora_config)
+    model.config.use_cache = False
+    if hasattr(model, "base_model"):
+        model.base_model.config.use_cache = False
+
+    if torch.cuda.is_available():
+        model.enable_input_require_grads()
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        print("[OK] use_cache explicitly disabled: False")
+        print("[OK] Non-reentrant gradient checkpointing enabled on model")
+        print(f"[OK] PYTORCH_CUDA_ALLOC_CONF: {os.environ.get('PYTORCH_CUDA_ALLOC_CONF')}")
+
     model.print_trainable_parameters()
 
     # Construct TrainingArguments safely across transformers versions

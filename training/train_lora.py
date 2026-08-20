@@ -190,6 +190,7 @@ def train(args):
     training_kwargs = {
         "output_dir": target_dir,
         "per_device_train_batch_size": args.batch_size,
+        "per_device_eval_batch_size": 2,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
         "learning_rate": args.learning_rate,
         "lr_scheduler_type": "cosine",
@@ -202,6 +203,8 @@ def train(args):
         "fp16": torch.cuda.is_available(),
         "bf16": False,
         "gradient_checkpointing": True if torch.cuda.is_available() else False,
+        "prediction_loss_only": True,
+        "eval_accumulation_steps": 1,
         "report_to": "none",
         "dataloader_num_workers": 0,
         "dataloader_pin_memory": torch.cuda.is_available(),

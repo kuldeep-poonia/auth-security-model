@@ -142,17 +142,34 @@ def train(args):
 
     print(f"[INFO] Train dataset size: {len(train_dataset)}, Val dataset size: {len(val_dataset) if val_dataset else 0}")
 
-    # Configure Quantization / Model Loading
-    device_map = "auto" if torch.cuda.is_available() else None
-    torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else (torch.float16 if torch.cuda.is_available() else torch.float32)
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    print(f"[INFO] Loading base model: {args.model_id} (dtype={torch_dtype}, cuda={torch.cuda.is_available()})")
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
-        torch_dtype=torch_dtype,
-        device_map=device_map,
-        trust_remote_code=True,
-    )
+    # Configure Quantization & Model Loading
+    if torch.cuda.is_available():
+        from transformers import BitsAndBytesConfig
+        from peft import prepare_model_for_kbit_training
+
+        print(f"[INFO] Loading base model with 4-bit QLoRA (BitsAndBytes NF4): {args.model_id}")
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            quantization_config=bnb_config,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    else:
+        print(f"[INFO] Loading base model on CPU: {args.model_id}")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            torch_dtype=torch.float32,
+            trust_remote_code=True,
+        )
 
     # Configure LoRA
     print(f"[INFO] Setting up LoRA (r={args.lora_r}, alpha={args.lora_alpha}, target_modules={DEFAULT_TARGET_MODULES})")
@@ -182,8 +199,9 @@ def train(args):
         "save_strategy": "steps",
         "save_steps": args.save_steps,
         "save_total_limit": 3,
-        "fp16": (torch_dtype == torch.float16),
-        "bf16": (torch_dtype == torch.bfloat16),
+        "fp16": torch.cuda.is_available(),
+        "bf16": False,
+        "gradient_checkpointing": True if torch.cuda.is_available() else False,
         "report_to": "none",
         "dataloader_num_workers": 0,
         "dataloader_pin_memory": torch.cuda.is_available(),
@@ -276,13 +294,13 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=4,
+        default=2,
         help="Batch size per device",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
-        default=4,
+        default=8,
         help="Number of gradient accumulation steps",
     )
     parser.add_argument(

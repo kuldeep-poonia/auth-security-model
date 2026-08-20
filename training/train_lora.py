@@ -12,6 +12,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import torch
+from torch.utils.data import Dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -69,32 +70,40 @@ def find_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
     return max(valid_checkpoints, key=get_step)
 
 
-class SecurityDataset(torch.utils.data.Dataset):
-    """PyTorch dataset tokenizing ChatML messages for causal LM fine-tuning."""
+class SecurityDataset(Dataset):
+    """PyTorch Dataset that formats multi-turn chat records with prompt masking (-100 labels)."""
 
     def __init__(self, formatted_items: List[Dict[str, Any]], tokenizer: Any, max_length: int = 1024):
-        self.tokenizer = tokenizer
-        self.max_length = max_length
         self.examples = []
-
         for item in formatted_items:
             messages = item["messages"]
-            # Apply chat template
-            if hasattr(tokenizer, "apply_chat_template"):
-                prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-            else:
-                prompt = "\n".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in messages)
+            system_msg = messages[0]["content"]
+            user_msg = messages[1]["content"]
+            assistant_msg = messages[2]["content"]
 
-            tokens = tokenizer(
-                prompt,
-                truncation=True,
-                max_length=max_length,
-                padding=False,
-                return_tensors=None,
-            )
-            input_ids = tokens["input_ids"]
-            attention_mask = tokens["attention_mask"]
-            labels = list(input_ids)  # Standard causal LM prediction
+            context_messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ]
+
+            if hasattr(tokenizer, "apply_chat_template"):
+                context_text = tokenizer.apply_chat_template(context_messages, tokenize=False, add_generation_prompt=True)
+                full_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+            else:
+                context_text = f"<|im_start|>system\n{system_msg}<|im_end|>\n<|im_start|>user\n{user_msg}<|im_end|>\n<|im_start|>assistant\n"
+                full_text = f"{context_text}{assistant_msg}<|im_end|>"
+
+            # Tokenize context and full conversation
+            context_tokens = tokenizer(context_text, truncation=True, max_length=max_length, add_special_tokens=False)
+            full_tokens = tokenizer(full_text, truncation=True, max_length=max_length, add_special_tokens=False)
+
+            input_ids = full_tokens["input_ids"]
+            attention_mask = full_tokens["attention_mask"]
+            context_len = min(len(context_tokens["input_ids"]), len(input_ids))
+
+            # Prompt Masking: set labels to -100 for all system/user prompt tokens
+            # so the loss is computed EXCLUSIVELY on the assistant's JSON classification decision
+            labels = [-100] * context_len + input_ids[context_len:]
 
             self.examples.append({
                 "input_ids": input_ids,
@@ -176,7 +185,7 @@ def train(args):
     lora_config = LoraConfig(
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
-        lora_dropout=0.10,
+        lora_dropout=0.05,
         target_modules=DEFAULT_TARGET_MODULES,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
@@ -236,7 +245,7 @@ def train(args):
     callbacks = []
     if val_dataset and not args.smoke_test:
         from transformers import EarlyStoppingCallback
-        callbacks.append(EarlyStoppingCallback(early_stopping_patience=2, early_stopping_threshold=0.005))
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=8, early_stopping_threshold=0.001))
 
     trainer = Trainer(
         model=model,
@@ -333,7 +342,7 @@ def parse_args():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=2,
+        default=3,
         help="Number of training epochs",
     )
     parser.add_argument(
@@ -345,13 +354,13 @@ def parse_args():
     parser.add_argument(
         "--save_steps",
         type=int,
-        default=25,
+        default=50,
         help="Checkpoint save interval in steps",
     )
     parser.add_argument(
         "--eval_steps",
         type=int,
-        default=25,
+        default=50,
         help="Evaluation interval in steps",
     )
     parser.add_argument(

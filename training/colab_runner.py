@@ -21,12 +21,14 @@ def setup_colab_environment(drive_base_dir: str = "/content/drive/MyDrive/auth_s
         drive_base_dir = "checkpoints"
         os.makedirs(drive_base_dir, exist_ok=True)
 
-    print("=== Step 2: Installing Pinned Dependencies ===")
-    req_path = "requirements-lock.txt"
-    if os.path.exists(req_path):
-        cmd = [sys.executable, "-m", "pip", "install", "-r", req_path]
-        subprocess.check_call(cmd)
-        print("[OK] Pinned dependencies successfully installed.")
+    print("=== Step 2: Installing/Verifying Dependencies ===")
+    cmd = [
+        sys.executable, "-m", "pip", "install", "--quiet", "--upgrade",
+        "transformers>=4.40.0", "peft>=0.10.0", "datasets>=2.18.0",
+        "accelerate>=0.28.0", "bitsandbytes>=0.42.0", "scikit-learn>=1.4.0", "tqdm>=4.66.0"
+    ]
+    subprocess.check_call(cmd)
+    print("[OK] ML dependencies successfully installed and verified.")
 
     return drive_base_dir
 

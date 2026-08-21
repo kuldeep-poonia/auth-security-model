@@ -22,6 +22,16 @@ from transformers import (
     TrainingArguments,
     DataCollatorForSeq2Seq,
 )
+
+# Safe torchao bypass to prevent Kaggle/Colab incompatible version errors
+try:
+    import peft.import_utils
+    peft.import_utils.is_torchao_available = lambda: False
+    if hasattr(peft.import_utils, "is_torch_ao_available"):
+        peft.import_utils.is_torch_ao_available = lambda: False
+except Exception:
+    pass
+
 from peft import LoraConfig, get_peft_model, TaskType
 
 from training.logger import ExperimentLogger

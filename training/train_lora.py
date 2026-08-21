@@ -155,7 +155,7 @@ class SecurityDataset(Dataset):
 
 
 class WeightedTrainer(Trainer):
-    """Custom Trainer implementing sample-level class-weighted loss."""
+    """Custom Trainer implementing mathematically exact per-sample class-weighted cross-entropy loss."""
 
     def __init__(self, *args, vuln_loss_weight: float = 1.0, **kwargs):
         super().__init__(*args, **kwargs)
@@ -163,16 +163,31 @@ class WeightedTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         is_vuln_list = inputs.pop("is_vulnerable", None)
+        labels = inputs.get("labels")
         outputs = model(**inputs)
-        loss = outputs.get("loss") if isinstance(outputs, dict) else outputs.loss
 
-        if is_vuln_list is not None and self.vuln_loss_weight != 1.0 and loss is not None:
+        if is_vuln_list is not None and self.vuln_loss_weight != 1.0 and labels is not None and hasattr(outputs, "logits") and outputs.logits is not None:
+            logits = outputs.logits
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+
+            # Exact per-token cross entropy with ignore_index=-100
+            loss_fct = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=-100)
+            token_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)).view(shift_labels.size())
+
+            # Mask out un-supervised prompt tokens (-100)
+            valid_mask = (shift_labels != -100).float()
+            per_sample_loss = (token_loss * valid_mask).sum(dim=-1) / (valid_mask.sum(dim=-1) + 1e-8)
+
+            # Apply exact per-sample class weights (no cross-sample dilution)
             if not isinstance(is_vuln_list, torch.Tensor):
-                is_vuln_tensor = torch.tensor(is_vuln_list, device=loss.device, dtype=torch.float32)
+                is_vuln_tensor = torch.tensor(is_vuln_list, device=logits.device, dtype=torch.float32)
             else:
-                is_vuln_tensor = is_vuln_list.to(loss.device)
-            sample_weight = torch.where(is_vuln_tensor > 0.5, self.vuln_loss_weight, 1.0).mean()
-            loss = loss * sample_weight
+                is_vuln_tensor = is_vuln_list.to(logits.device)
+            sample_weights = torch.where(is_vuln_tensor > 0.5, self.vuln_loss_weight, 1.0)
+            loss = (per_sample_loss * sample_weights).mean()
+        else:
+            loss = outputs.get("loss") if isinstance(outputs, dict) else outputs.loss
 
         return (loss, outputs) if return_outputs else loss
 

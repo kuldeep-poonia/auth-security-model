@@ -352,7 +352,7 @@ def train(args):
     best_ckpt = getattr(trainer.state, "best_model_checkpoint", None)
     best_metric = getattr(trainer.state, "best_metric", None)
     if best_ckpt:
-        print(f"[OK] Best model loaded from: {best_ckpt} (best eval_loss: {best_metric:.4f})")
+        print(f"[OK] Best model loaded from: {best_ckpt} (best eval_f1: {best_metric:.4f})")
 
     final_adapter_dir = os.path.join(target_dir, "final_adapter")
     trainer.save_model(final_adapter_dir)

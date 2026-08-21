@@ -43,13 +43,10 @@ def normalize_prediction(raw: Dict[str, Any]) -> Dict[str, Any]:
     elif "vulnerability_class" in raw:
         vuln_class = str(raw["vulnerability_class"])
 
-    if not is_vuln and vuln_class != "none":
-        if vuln_class in ["auth_bypass", "missing_authz_check", "incorrect_authz", "IDOR"]:
-            is_vuln = True
-        else:
-            vuln_class = "none"
-
-    if is_vuln and (vuln_class == "none" or not vuln_class):
+    # If the model explicitly declared vulnerable=False, vuln_class MUST be none
+    if not is_vuln:
+        vuln_class = "none"
+    elif vuln_class == "none" or not vuln_class:
         vuln_class = "missing_authz_check"
 
     try:

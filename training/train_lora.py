@@ -125,10 +125,13 @@ class SecurityDataset(Dataset):
             assert len(input_ids) == len(labels) == len(attention_mask) <= max_length
             assert any(l != -100 for l in labels), "Record must have supervised labels"
 
+            is_vuln = bool(item.get("is_vulnerable", False) or ('"is_vulnerable": true' in assistant_msg.lower()))
+
             self.examples.append({
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
                 "labels": labels,
+                "is_vulnerable": 1.0 if is_vuln else 0.0,
             })
 
     def __len__(self):
@@ -136,6 +139,46 @@ class SecurityDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.examples[idx]
+
+
+class WeightedTrainer(Trainer):
+    """Custom Trainer implementing token-masked class-weighted cross-entropy loss."""
+
+    def __init__(self, *args, vuln_loss_weight: float = 1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.vuln_loss_weight = vuln_loss_weight
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.get("labels")
+        is_vuln_list = inputs.pop("is_vulnerable", None)
+
+        outputs = model(**inputs)
+        logits = outputs.get("logits")
+
+        if labels is not None and logits is not None:
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+
+            loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            loss = loss.view(shift_labels.size())
+
+            valid_mask = (shift_labels != -100).float()
+            token_losses = (loss * valid_mask).sum(dim=-1) / (valid_mask.sum(dim=-1) + 1e-8)
+
+            if is_vuln_list is not None and self.vuln_loss_weight != 1.0:
+                if not isinstance(is_vuln_list, torch.Tensor):
+                    is_vuln_tensor = torch.tensor(is_vuln_list, device=logits.device, dtype=torch.float32)
+                else:
+                    is_vuln_tensor = is_vuln_list.to(logits.device)
+                sample_weights = torch.where(is_vuln_tensor > 0.5, self.vuln_loss_weight, 1.0)
+                final_loss = (token_losses * sample_weights).mean()
+            else:
+                final_loss = token_losses.mean()
+        else:
+            final_loss = outputs.get("loss")
+
+        return (final_loss, outputs) if return_outputs else final_loss
 
 
 def train(args):
@@ -328,15 +371,17 @@ def train(args):
     if val_dataset and not args.smoke_test:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=6, early_stopping_threshold=0.001))
 
-    trainer = Trainer(
+    # Initialize WeightedTrainer with class-weighted loss support
+    trainer = WeightedTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        data_collator=data_collator,
+        data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True),
         compute_metrics=compute_metrics if (val_dataset and not args.smoke_test) else None,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics if (val_dataset and not args.smoke_test) else None,
         callbacks=callbacks,
+        vuln_loss_weight=args.vuln_loss_weight,
     )
 
     latest_ckpt = find_latest_checkpoint(target_dir) if args.resume else None
@@ -463,6 +508,12 @@ def parse_args():
         type=int,
         default=32,
         help="LoRA alpha scaling factor",
+    )
+    parser.add_argument(
+        "--vuln_loss_weight",
+        type=float,
+        default=1.0,
+        help="Loss weight multiplier for vulnerable examples to compensate for class imbalance",
     )
     parser.add_argument(
         "--smoke_test",

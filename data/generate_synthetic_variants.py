@@ -1,7 +1,12 @@
-"""High-Volume Deterministic Synthetic Mutation Generator.
+"""High-Scale Multi-Strategy Deterministic Synthetic Mutation Generator.
 
-Generates realistic, AST-grounded variants from 2,550+ verified functional base units
-across all 6 target languages: Python, JavaScript, TypeScript, PHP, Go, Java.
+Generates thousands of realistic, AST-grounded variants across all 4 vulnerability classes
+and clean remediations across all 6 languages (Python, JavaScript, TypeScript, PHP, Go, Java):
+- idor: Tenant/owner filter removal, parameter tampering, unscoped direct lookups.
+- missing_authz: Decorator/annotation stripping, policy check omission, prologue guard deletion.
+- incorrect_authz: Role/clearance comparison inversion, boolean logic weakening, short-circuit bypass.
+- auth_bypass: Timing-safe comparison degradation, unverified JWT decode, none-algorithm, hash bypass.
+- clean_remediation: Effective precedence-ordered guards, ownership filters, timing-safe compare.
 """
 
 import ast
@@ -31,35 +36,49 @@ def generate_idor_variants(code: str, lang: str) -> List[Tuple[str, str]]:
     fn_name = extract_primary_function_name(code)
     fn_str = f"Function `{fn_name}()`" if fn_name else "Method"
 
-    # Pattern A: Django get_object_or_404 user scoping (Clean AST preservation)
+    # Strategy 1: Django get_object_or_404 user/owner scoping removal
     if "get_object_or_404" in code:
-        # Match get_object_or_404 with user=request.user
-        m1 = re.sub(r',\s*user=request\.user\b', '', code)
-        m1 = re.sub(r'\buser=request\.user\s*,\s*', '', m1)
-        m1 = re.sub(r',\s*user_id=request\.user\.id\b', '', m1)
-        m1 = re.sub(r'\buser_id=request\.user\.id\s*,\s*', '', m1)
-        if m1 != code:
-            variants.append((m1, f"{fn_str} retrieves model instance directly without filtering by `request.user` (CWE-639 IDOR)."))
+        for user_pat in [
+            r",\s*user=request\.user\b", r"\buser=request\.user\s*,\s*",
+            r",\s*user_id=request\.user\.id\b", r"\buser_id=request\.user\.id\s*,\s*",
+            r",\s*owner=request\.user\b", r"\bowner=request\.user\s*,\s*",
+            r",\s*author=request\.user\b", r"\bauthor=request\.user\s*,\s*",
+        ]:
+            if re.search(user_pat, code):
+                m1 = re.sub(user_pat, "", code)
+                if m1 != code:
+                    variants.append((m1, f"{fn_str} retrieves model instance directly without filtering by `request.user` (CWE-639 IDOR)."))
 
-    # Pattern B: Scoped query filter parameter removal
-    for param in ["user_id", "owner_id", "tenant_id", "account_id", "userId", "ownerId", "tenantId"]:
+    # Strategy 2: ORM filter parameter removal across tenant/user fields
+    owner_params = [
+        "user_id", "owner_id", "tenant_id", "account_id", "org_id", "company_id", "workspace_id", "author_id",
+        "userId", "ownerId", "tenantId", "accountId", "orgId", "companyId", "workspaceId", "authorId"
+    ]
+    for param in owner_params:
         if param in code:
             m2 = re.sub(rf",\s*{param}\s*[:=]\s*[^,\s)]+", "", code, flags=re.IGNORECASE)
             m2 = re.sub(rf"\b{param}\s*[:=]\s*[^,\s)]+\s*,\s*", "", m2, flags=re.IGNORECASE)
             m2 = re.sub(rf"\.where\(['\"]{param}['\"],\s*[^)]+\)", "", m2, flags=re.IGNORECASE)
+            m2 = re.sub(rf"\.filter\([^)]*{param}\s*=\s*[^)]*\)", "", m2, flags=re.IGNORECASE)
             m2 = re.sub(rf"(\band\s+{param}\s*=\s*[^;\n)]+)", "", m2, flags=re.IGNORECASE)
-            if m2 != code:
+            if m2 != code and len(m2.strip()) > 25:
                 variants.append((m2, f"{fn_str} executes database lookup directly by ID without scoping to caller's `{param}` (CWE-639 IDOR)."))
 
-    # Pattern C: Strip explicit ownership comparison guard
-    owner_guard = re.search(
-        r"(if\s+[^:\n{]*(?:owner_id|user_id|tenant_id|ownerId|userId|OwnerID)[^:\n{]*(?:!=|!==|==)\s*[^:\n{]*(?:user|caller|principal|Auth::id)[^:\n{]*:\s*\n(?:\s+[^\n]+\n)+)",
+    # Strategy 3: Strip explicit ownership comparison guard
+    owner_guards = re.findall(
+        r"(?:if\s*\([^)]*(?:owner|user|tenant|author|account)[^)]*(?:!=|!==|==)[^)]*\)\s*\{[^}]+\}|if\s+[^:\n{]*(?:owner_id|user_id|tenant_id|ownerId|userId|OwnerID)[^:\n{]*(?:!=|!==|==)\s*[^:\n{]*(?:user|caller|principal|Auth::id)[^:\n{]*:\s*\n(?:\s+[^\n]+\n)+)",
         code, flags=re.IGNORECASE
     )
-    if owner_guard:
-        m3 = code.replace(owner_guard.group(0), "").strip()
-        if m3 and m3 != code:
+    for og in owner_guards:
+        m3 = code.replace(og, "").strip()
+        if m3 and m3 != code and len(m3) > 25:
             variants.append((m3, f"{fn_str} strips resource `owner_id` verification before returning sensitive object (CWE-639 IDOR)."))
+
+    # Strategy 4: Method call replacement findByOwnerAndId -> findById
+    if any(k in code for k in ("findByOwnerAndId", "findByUserAndId", "findByTenantAndId", "findByAccountAndId")):
+        m4 = re.sub(r"findBy(?:Owner|User|Tenant|Account)AndId\(([^,]+),\s*([^)]+)\)", r"findById(\2)", code)
+        if m4 != code:
+            variants.append((m4, f"{fn_str} replaces scoped query method with unscoped `findById` (CWE-639 IDOR)."))
 
     return variants
 
@@ -73,33 +92,34 @@ def generate_missing_authz_variants(code: str, lang: str) -> List[Tuple[str, str
     fn_name = extract_primary_function_name(code)
     fn_str = f"Method `{fn_name}()`" if fn_name else "Handler"
 
-    # Pattern A: Decorator removal
-    decorators = re.findall(r"@(?:login_required|permission_required|user_passes_test|PreAuthorize|Secured|RolesAllowed|UseGuards|RequirePermission)(?:\([^)]*\))?\s*\n", code, re.IGNORECASE)
+    # Strategy 1: Decorator removal
+    decorators = re.findall(r"@(?:login_required|permission_required|user_passes_test|PreAuthorize|Secured|RolesAllowed|UseGuards|RequirePermission|has_permission)(?:\([^)]*\))?\s*\n", code, re.IGNORECASE)
     for dec in decorators:
         m1 = code.replace(dec, "").strip()
         if m1 != code:
             variants.append((m1, f"{fn_str} executes sensitive action without `{dec.strip()}` authorization guard (CWE-862)."))
 
-    # Pattern B: Policy assertion removal
-    if "$this->authorize" in code or "Gate::authorize" in code:
-        m2 = re.sub(r"(?:\$this->authorize|Gate::authorize)\([^)]+\);\s*\n?", "", code)
+    # Strategy 2: Policy assertions
+    if any(k in code for k in ("$this->authorize", "Gate::authorize", "Gate::allows", "Gate::deny", "authorize(")):
+        m2 = re.sub(r"(?:\$this->authorize|Gate::authorize|Gate::allows|authorize)\([^)]+\);\s*\n?", "", code)
         if m2 != code:
             variants.append((m2, f"{fn_str} mutates resource without invoking `$this->authorize()` policy check (CWE-862)."))
 
-    # Pattern C: Guard clause removal
-    guard_match = re.search(
-        r"(if\s+(?:not\s+|!)?(?:request\.user|user|req\.user|Auth::user\(\))\.(?:is_authenticated|has_perm|hasPermission|can|isAdmin|is_admin)\([^)]*\)\s*:\s*\n(?:\s+raise[^\n]+\n|\s+return[^\n]+\n))",
+    # Strategy 3: Guard clauses
+    guard_match = re.findall(
+        r"(?:if\s*\([^)]*(?:is_authenticated|has_perm|hasPermission|can|isAdmin|is_admin|checkPermission)[^)]*\)\s*\{[^}]+\}|if\s+(?:not\s+|!)?(?:request\.user|user|req\.user|Auth::user\(\))\.(?:is_authenticated|has_perm|hasPermission|can|isAdmin|is_admin)\([^)]*\)\s*:\s*\n(?:\s+raise[^\n]+\n|\s+return[^\n]+\n))",
         code, flags=re.IGNORECASE
     )
-    if guard_match:
-        m3 = code.replace(guard_match.group(0), "").strip()
-        if m3 != code:
+    for gm in guard_match:
+        m3 = code.replace(gm, "").strip()
+        if m3 != code and len(m3) > 25:
             variants.append((m3, f"{fn_str} executes sensitive logic without verifying caller `is_authenticated` state (CWE-862)."))
 
-    # Pattern D: DRF check_permissions
-    if "self.check_permissions(request)" in code:
-        m4 = code.replace("self.check_permissions(request)", "")
-        variants.append((m4, f"{fn_str} omits `self.check_permissions(request)` invocation before processing action (CWE-862)."))
+    # Strategy 4: Framework permission checks
+    for chk in ["self.check_permissions(request)", "self.check_object_permissions(request, obj)", "check_permissions()"]:
+        if chk in code:
+            m4 = code.replace(chk, "")
+            variants.append((m4, f"{fn_str} omits `{chk}` invocation before processing action (CWE-862)."))
 
     return variants
 
@@ -125,8 +145,12 @@ def generate_incorrect_authz_variants(code: str, lang: str) -> List[Tuple[str, s
         (r'clearance\s*>=\s*\d+', 'clearance >= 0', "weakening clearance check to `clearance >= 0`"),
         (r'hasRole\(["\']ADMIN["\']\)', '!hasRole("ADMIN")', "inverting `!hasRole('ADMIN')` check"),
         (r'hasRole\(["\']ROLE_ADMIN["\']\)', '!hasRole("ROLE_ADMIN")', "inverting `!hasRole('ROLE_ADMIN')` check"),
+        (r'hasAuthority\(["\']ADMIN["\']\)', '!hasAuthority("ADMIN")', "inverting authority check"),
         (r'has_perm\([^)]+\)', 'True', "forcing `has_perm()` to unconditionally return True"),
         (r'can\([^)]+\)', 'true', "forcing `$user->can()` to unconditionally return true"),
+        (r'user\.is_staff\s*and\s*user\.is_active', 'user.is_staff or user.is_active', "relaxing `and` to `or` conjunction"),
+        (r'isAdmin\s*&&\s*isOwner', 'isAdmin || isOwner', "relaxing `&&` to `||` conjunction"),
+        (r'hasRole\("ADMIN"\)\s*&&\s*hasRole\("AUDIT"\)', 'hasRole("ADMIN") || hasRole("AUDIT")', "relaxing role requirements with `||`"),
     ]
 
     for pat, rep, desc in inversion_pairs:
@@ -147,7 +171,7 @@ def generate_auth_bypass_variants(code: str, lang: str) -> List[Tuple[str, str]]
     fn_name = extract_primary_function_name(code)
     fn_str = f"Handler `{fn_name}()`" if fn_name else "Authentication handler"
 
-    # Pattern A: Timing attack on comparisons
+    # Strategy 1: Timing attacks
     if "constant_time_compare(" in code:
         m1 = re.sub(r"constant_time_compare\(([^,]+),\s*([^)]+)\)", r"\1 == \2", code)
         if m1 != code:
@@ -163,19 +187,24 @@ def generate_auth_bypass_variants(code: str, lang: str) -> List[Tuple[str, str]]
         if m3 != code:
             variants.append((m3, f"{fn_str} replaces timing-safe Go `subtle.ConstantTimeCompare` with standard comparison (CWE-287)."))
 
-    # Pattern B: JWT unverified decode
+    if "MessageDigest.isEqual" in code:
+        m3b = re.sub(r"MessageDigest\.isEqual\(([^,]+),\s*([^)]+)\)", r"Arrays.equals(\1, \2)", code)
+        if m3b != code:
+            variants.append((m3b, f"{fn_str} replaces timing-safe `MessageDigest.isEqual` with non-constant-time `Arrays.equals` (CWE-287)."))
+
+    # Strategy 2: JWT unverified decode
     if "jwt.verify(" in code:
         m4 = re.sub(r"jwt\.verify\(([^,]+),[^)]+\)", r"jwt.decode(\1)", code)
         if m4 != code:
             variants.append((m4, f"{fn_str} replaces cryptographic `jwt.verify()` with unverified `jwt.decode()`, bypassing signature verification (CWE-287)."))
 
-    # Pattern C: Algorithm none in JWT
+    # Strategy 3: Algorithm none in JWT
     if re.search(r"algorithms=\[['\"]HS256['\"]\]", code):
         m5 = re.sub(r"algorithms=\[['\"]HS256['\"]\]", "algorithms=['none', 'HS256']", code)
         if m5 != code:
             variants.append((m5, f"{fn_str} permits insecure `none` algorithm in JWT verification whitelist (CWE-287)."))
 
-    # Pattern D: Password hash verification bypass
+    # Strategy 4: Password hash verification bypass
     if "password_verify(" in code:
         m6 = re.sub(r"password_verify\([^)]+\)", "true /* bypassed */", code)
         if m6 != code:
@@ -185,6 +214,13 @@ def generate_auth_bypass_variants(code: str, lang: str) -> List[Tuple[str, str]]
         m7 = re.sub(r"bcrypt\.compare\([^)]+\)", "Promise.resolve(true)", code)
         if m7 != code:
             variants.append((m7, f"{fn_str} forces `bcrypt.compare()` to resolve true without verifying password hash (CWE-287)."))
+
+    # Strategy 5: Insecure default secret keys
+    if "os.getenv('SECRET_KEY')" in code or "process.env.SECRET_KEY" in code:
+        m8 = re.sub(r"(os\.getenv\(['\"]SECRET_KEY['\"])\)", r"\1, 'insecure_default_secret_key')", code)
+        m8 = re.sub(r"(process\.env\.SECRET_KEY)", r"(\1 || 'insecure_default_secret_key')", m8)
+        if m8 != code:
+            variants.append((m8, f"{fn_str} introduces insecure hardcoded fallback secret key (CWE-287)."))
 
     return variants
 

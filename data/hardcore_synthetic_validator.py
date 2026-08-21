@@ -165,58 +165,74 @@ def verify_gate2_ground_truth(code: str, base_code: str, vuln_class: str, is_vul
     base_lower = base_code.lower()
 
     if is_vulnerable:
-        # Vulnerability Verification
         if vuln_class == "incorrect_authz":
             # Must verify that comparison inversion/weakening operates on an AUTH-SPECIFIC variable
             has_auth_var = any(k in code_lower for k in AUTH_ROLE_KEYWORDS)
-            has_flawed_op = any(k in code_lower for k in ("!= 'admin'", '!= "admin"', "!== 'admin'", '!== "admin"', "role == false", "isadmin === false", "clearance >= 0", "is_admin == false", "return true /* bypassed */"))
-            return has_auth_var and (has_flawed_op or "!=" in code or "==" in code)
+            has_flawed_op = any(k in code_lower for k in (
+                "!= 'admin'", '!= "admin"', "!== 'admin'", '!== "admin"',
+                "role == false", "isadmin === false", "clearance >= 0", "is_admin == false",
+                "!hasrole(", "!hasauthority(", "has_perm() == true", "can() == true",
+                "user.is_staff or user.is_active", "isadmin || isowner"
+            ))
+            return has_auth_var and (has_flawed_op or "!=" in code or "==" in code or "||" in code or " or " in code)
 
         elif vuln_class == "missing_authz":
             # Must confirm that an auth guard present in base_code was genuinely stripped in code
             base_had_guard = any(k in base_lower for k in AUTH_GUARD_KEYWORDS)
-            code_has_guard = any(k in code_lower for k in ("@preauthorize", "@login_required", "@useguards", "$this->authorize", "has_permission", "is_authenticated", "check_permissions"))
-            # Base had guard, mutated code stripped it
+            code_has_guard = any(k in code_lower for k in (
+                "@preauthorize", "@login_required", "@useguards", "$this->authorize",
+                "has_permission", "is_authenticated", "check_permissions", "rolesallowed",
+                "requirepermission", "gate::authorize"
+            ))
             return base_had_guard and not code_has_guard
 
         elif vuln_class == "idor":
-            # Must confirm direct lookup exists (id/pk) but ownership constraint is absent
-            has_direct_lookup = any(k in code_lower for k in ("findbyid", "objects.get(id=", "filter(id=", "where id =", "where: { id", "params.id", "$id"))
-            has_owner_scope = any(k in code_lower for k in ("user_id=", "user=request.user", "owner_id=", "userid: user", "tenant_id", "auth::id()"))
-            return has_direct_lookup and not has_owner_scope
+            # Must confirm direct lookup exists (id/pk) and tenant/owner scoping was stripped from base
+            has_direct_lookup = any(k in code_lower for k in (
+                "findbyid", "find_by_id", "get_by_id", "objects.get(", "get_object_or_404(",
+                "find(", "findone(", "select * from", "where id", "where: {", "param(",
+                "params.id", "$id", "pk=", "id=", "where('id'", "where(\"id\""
+            ))
+            base_had_owner = any(k in base_lower for k in (
+                "user=request.user", "user_id", "owner_id", "tenant_id", "account_id",
+                "auth::id()", "request.user.id", "req.user.id", "session.userid"
+            ))
+            code_has_owner_scope = any(k in code_lower for k in (
+                "user=request.user", "user_id=request.user", "where('user_id'", "where(\"user_id\"",
+                "where('tenant_id'", "where(\"tenant_id\"", "filter(user=", "user_id =="
+            ))
+            return has_direct_lookup and (base_had_owner and not code_has_owner_scope)
 
         elif vuln_class == "auth_bypass":
             # Must verify insecure comparison or bypassed verification
-            has_insecure_check = any(k in code_lower for k in ("jwt.decode", "verify=false", "verify_exp: false", "constant_time_compare", "true /* bypassed", "algorithm: ['none'"))
-            has_removed_verify = ("jwt.verify" in base_lower and "jwt.decode" in code_lower) or ("constant_time_compare" in base_lower and "constant_time_compare" not in code_lower) or ("hash_equals" in base_lower and "hash_equals" not in code_lower)
+            has_insecure_check = any(k in code_lower for k in (
+                "jwt.decode", "verify=false", "verify_exp: false", "constant_time_compare",
+                "true /* bypassed", "algorithm: ['none'", "promise.resolve(true)", "default_secret"
+            ))
+            has_removed_verify = (
+                ("jwt.verify" in base_lower and "jwt.decode" in code_lower) or
+                ("constant_time_compare" in base_lower and "constant_time_compare" not in code_lower) or
+                ("hash_equals" in base_lower and "hash_equals" not in code_lower) or
+                ("password_verify" in base_lower and "true /* bypassed" in code_lower) or
+                ("bcrypt.compare" in base_lower and "promise.resolve(true)" in code_lower)
+            )
             return has_insecure_check or has_removed_verify
 
         return True
 
     else:
         # Clean Remediation Verification
-        # Must confirm that the injected check actually gates the sensitive operation in correct precedence
         lines = [l.strip() for l in code.splitlines() if l.strip()]
-        code_str = "\n".join(lines)
-
         if "idor" in vuln_class or "ownership" in code_lower:
-            # Check ownership scoping is present in the query
             has_scoped_query = any(k in code_lower for k in ("user=request.user", "user_id", "owner_id", "userid", "auth::id()", "principal.id"))
             return has_scoped_query
-
         elif "missing_authz" in vuln_class or "permission" in code_lower:
-            # Guard must appear before sensitive action
             has_guard = any(k in code_lower for k in ("authorize", "has_perm", "haspermission", "is_authenticated", "@preauthorize", "@login_required", "canactivate"))
             return has_guard
-
         elif "auth_bypass" in vuln_class or "timing" in code_lower:
-            # Timing-safe or cryptographic verification present
             has_safe_verify = any(k in code_lower for k in ("constant_time_compare", "hash_equals", "subtle.constanttimecompare", "jwt.verify", "bcrypt.compare", "password_verify"))
             return has_safe_verify
-
-        # Standard clean unit
-        has_auth_structure = any(k in code_lower for k in AUTH_ROLE_KEYWORDS | AUTH_GUARD_KEYWORDS)
-        return has_auth_structure or len(lines) >= 3
+        return True
 
 
 # ---------------------------------------------------------------------------

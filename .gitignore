@@ -17,7 +17,14 @@ venv/
 ENV/
 
 # Large raw crawls and intermediate manifests
-data/raw/
+data/raw/*
+!data/raw/framework_negatives/
+!data/raw/framework_negatives/*.json
+!data/raw/package_advisories/*.json
+!data/raw/framework_security/*.json
+!data/raw/tech_docs/*.json
+!data/raw/stackoverflow_security/*.json
+!data/raw/conference_benchmarks/*.json
 data/raw_staging_manifest.json
 data/cleaned_dataset_manifest.json
 data/cleaned_negative_examples.json

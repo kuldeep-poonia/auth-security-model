@@ -8,6 +8,7 @@ Contains 5 realistic, subtle Python authorization & authentication test cases:
 5. Complex-looking but 100% SOUND cryptographic token exchange (Clean baseline)
 """
 
+import argparse
 import json
 import os
 import re

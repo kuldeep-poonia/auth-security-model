@@ -155,43 +155,26 @@ class SecurityDataset(Dataset):
 
 
 class WeightedTrainer(Trainer):
-    """Custom Trainer implementing token-masked class-weighted cross-entropy loss."""
+    """Custom Trainer implementing sample-level class-weighted loss."""
 
     def __init__(self, *args, vuln_loss_weight: float = 1.0, **kwargs):
         super().__init__(*args, **kwargs)
         self.vuln_loss_weight = vuln_loss_weight
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        labels = inputs.get("labels")
         is_vuln_list = inputs.pop("is_vulnerable", None)
-
         outputs = model(**inputs)
-        logits = outputs.get("logits")
+        loss = outputs.get("loss") if isinstance(outputs, dict) else outputs.loss
 
-        if labels is not None and logits is not None:
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-
-            loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            loss = loss.view(shift_labels.size())
-
-            valid_mask = (shift_labels != -100).float()
-            token_losses = (loss * valid_mask).sum(dim=-1) / (valid_mask.sum(dim=-1) + 1e-8)
-
-            if is_vuln_list is not None and self.vuln_loss_weight != 1.0:
-                if not isinstance(is_vuln_list, torch.Tensor):
-                    is_vuln_tensor = torch.tensor(is_vuln_list, device=logits.device, dtype=torch.float32)
-                else:
-                    is_vuln_tensor = is_vuln_list.to(logits.device)
-                sample_weights = torch.where(is_vuln_tensor > 0.5, self.vuln_loss_weight, 1.0)
-                final_loss = (token_losses * sample_weights).mean()
+        if is_vuln_list is not None and self.vuln_loss_weight != 1.0 and loss is not None:
+            if not isinstance(is_vuln_list, torch.Tensor):
+                is_vuln_tensor = torch.tensor(is_vuln_list, device=loss.device, dtype=torch.float32)
             else:
-                final_loss = token_losses.mean()
-        else:
-            final_loss = outputs.get("loss")
+                is_vuln_tensor = is_vuln_list.to(loss.device)
+            sample_weight = torch.where(is_vuln_tensor > 0.5, self.vuln_loss_weight, 1.0).mean()
+            loss = loss * sample_weight
 
-        return (final_loss, outputs) if return_outputs else final_loss
+        return (loss, outputs) if return_outputs else loss
 
 
 def train(args):
@@ -230,7 +213,18 @@ def train(args):
     train_dataset = SecurityDataset(train_items, tokenizer, max_length=args.max_length)
     val_dataset = SecurityDataset(val_items, tokenizer, max_length=args.max_length) if val_items else None
 
-    print(f"[INFO] Train dataset size: {len(train_dataset)}, Val dataset size: {len(val_dataset) if val_dataset else 0}")
+    real_cnt = sum(1 for r in train_items if "hardcore_validated_synthetic" not in str(r.get("source", "")))
+    synth_cnt = len(train_items) - real_cnt
+    vuln_cnt = sum(1 for r in train_items if bool(r.get("is_vulnerable", False) or ('"is_vulnerable": true' in r["messages"][2]["content"].lower())))
+    clean_cnt = len(train_items) - vuln_cnt
+
+    print("=" * 75)
+    print(f"[DATASET] Total Training Examples: {len(train_items)} (Real: {real_cnt}, Synthetic: {synth_cnt})")
+    print(f"[DATASET] Class Balance: {vuln_cnt} Vulnerable ({vuln_cnt/len(train_items)*100:.1f}%) | {clean_cnt} Clean ({clean_cnt/len(train_items)*100:.1f}%)")
+    print(f"[CONFIG] Detected GPUs: {torch.cuda.device_count() if torch.cuda.is_available() else 0}")
+    print(f"[CONFIG] Vulnerable Loss Weight: {args.vuln_loss_weight}x")
+    print(f"[CONFIG] Train dataset tokens size: {len(train_dataset)}, Val: {len(val_dataset) if val_dataset else 0}")
+    print("=" * 75)
 
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 

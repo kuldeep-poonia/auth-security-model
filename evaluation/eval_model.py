@@ -293,3 +293,106 @@ def run_evaluation_on_split(
     }
 
     return evaluation_report, evaluated_items
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate Fine-Tuned Model on Test Split")
+    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-0.5B-Instruct", help="Base model identifier")
+    parser.add_argument("--model_path", type=str, default="checkpoints", help="Path to fine-tuned LoRA checkpoint directory")
+    parser.add_argument("--adapter_path", type=str, default=None, help="Alias for model_path")
+    parser.add_argument("--test_file", type=str, default="data/splits/test.json", help="Path to held-out test split JSON")
+    parser.add_argument("--output_dir", type=str, default="evaluation/results", help="Directory to store evaluation outputs")
+    parser.add_argument("--batch_size", type=int, default=8, help="Evaluation batch size")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--run_baseline", action="store_true", help="Also evaluate zero-shot base model")
+    args = parser.parse_args()
+
+    adapter_dir = args.adapter_path if args.adapter_path else args.model_path
+
+    # If adapter_dir is a parent folder containing checkpoint-* subdirs, find the latest
+    if os.path.exists(adapter_dir) and not os.path.exists(os.path.join(adapter_dir, "adapter_config.json")):
+        import glob
+        subdirs = glob.glob(os.path.join(adapter_dir, "checkpoint-*"))
+        if subdirs:
+            def get_step(p):
+                m = re.search(r"checkpoint-(\d+)", p)
+                return int(m.group(1)) if m else -1
+            adapter_dir = max(subdirs, key=get_step)
+            print(f"[INFO] Selected latest checkpoint: {adapter_dir}")
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    print(f"\n================================================================================")
+    print(f"  LAUNCHING PHASE 6 BENCHMARK EVALUATION")
+    print(f"  • Base Model: {args.model_id}")
+    print(f"  • Adapter Path: {adapter_dir}")
+    print(f"  • Test Dataset: {args.test_file}")
+    print(f"  • Device: {args.device}")
+    print(f"================================================================================\n")
+
+    with open(args.test_file, "r", encoding="utf-8") as f:
+        test_records = json.load(f)
+
+    print(f"[INFO] Loaded {len(test_records)} verified test samples (100% Real Code, Untouched).")
+
+    model, tokenizer = load_model_for_evaluation(
+        model_id=args.model_id,
+        adapter_path=adapter_dir,
+        device=args.device,
+    )
+
+    ft_report, ft_predictions = run_evaluation_on_split(
+        model=model,
+        tokenizer=tokenizer,
+        test_records=test_records,
+        batch_size=args.batch_size,
+    )
+
+    # Save fine-tuned predictions
+    ft_pred_path = os.path.join(args.output_dir, "test_predictions_finetuned.jsonl")
+    with open(ft_pred_path, "w", encoding="utf-8") as f:
+        for p in ft_predictions:
+            f.write(json.dumps(p) + "\n")
+
+    # Save metrics JSON
+    metrics_path = os.path.join(args.output_dir, "evaluation_metrics.json")
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump({"fine_tuned_metrics": ft_report}, f, indent=2)
+
+    # Print summary tables
+    ov = ft_report["overall_metrics"]
+    pc = ft_report["per_class_metrics"]
+    pl = ft_report["per_language_metrics"]
+
+    print("\n" + "=" * 80)
+    print("  PHASE 6 OVERALL BENCHMARK RESULTS")
+    print("=" * 80)
+    print(f"  • Accuracy:    {ov['accuracy']*100:.2f}%")
+    print(f"  • Precision:   {ov['precision']*100:.2f}%")
+    print(f"  • Recall:      {ov['recall']*100:.2f}%")
+    print(f"  • F1-Score:    {ov['f1_score']:.4f}")
+    print(f"  • Specificity: {ov['specificity']*100:.2f}%")
+    print(f"  • FPR:         {ov['false_positive_rate']*100:.2f}%")
+    print(f"  • FNR:         {ov['false_negative_rate']*100:.2f}%")
+    print(f"  • Confusion:   TP={ov['true_positives']}, FP={ov['false_positives']}, TN={ov['true_negatives']}, FN={ov['false_negatives']} (Total N={ov['total_samples']})")
+
+    print("\n" + "-" * 80)
+    print("  PER-CLASS PERFORMANCE BREAKDOWN")
+    print("-" * 80)
+    print(f"{'Vulnerability Class':<22} | {'GT N':<6} | {'Pred N':<6} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<8}")
+    print("-" * 80)
+    for c, m in pc.items():
+        print(f"{c:<22} | {m['ground_truth_samples']:<6} | {m['predicted_samples']:<6} | {m['precision']*100:>8.1f}% | {m['recall']*100:>8.1f}% | {m['f1_score']:>8.4f}")
+
+    print("\n" + "-" * 80)
+    print("  PER-LANGUAGE PERFORMANCE BREAKDOWN")
+    print("-" * 80)
+    print(f"{'Language':<14} | {'Total N':<8} | {'Accuracy':<10} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<8}")
+    print("-" * 80)
+    for l, m in pl.items():
+        print(f"{l:<14} | {m['total_samples']:<8} | {m['accuracy']*100:>8.1f}% | {m['precision']*100:>8.1f}% | {m['recall']*100:>8.1f}% | {m['f1_score']:>8.4f}")
+    print("=" * 80 + "\n")
+
+
+if __name__ == "__main__":
+    main()

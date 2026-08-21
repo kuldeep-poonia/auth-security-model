@@ -512,8 +512,8 @@ def parse_args():
     parser.add_argument(
         "--vuln_loss_weight",
         type=float,
-        default=1.0,
-        help="Loss weight multiplier for vulnerable examples to compensate for class imbalance",
+        default=3.7,
+        help="Loss weight multiplier for vulnerable examples to compensate for class imbalance (default: 3.7)",
     )
     parser.add_argument(
         "--smoke_test",

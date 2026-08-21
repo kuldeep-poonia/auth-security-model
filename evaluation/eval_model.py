@@ -15,12 +15,15 @@ if PROJECT_ROOT not in sys.path:
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Safe torchao bypass to prevent Kaggle/Colab incompatible version errors
+# Complete torchao bypass for PEFT in all environments (Kaggle/Colab/Codespace)
 try:
     import peft.import_utils
     peft.import_utils.is_torchao_available = lambda: False
     if hasattr(peft.import_utils, "is_torch_ao_available"):
         peft.import_utils.is_torch_ao_available = lambda: False
+    import peft.tuners.lora.torchao
+    peft.tuners.lora.torchao.dispatch_torchao = lambda *args, **kwargs: None
+    peft.tuners.lora.torchao.is_torchao_available = lambda: False
 except Exception:
     pass
 

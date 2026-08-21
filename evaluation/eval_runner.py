@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 # Ensure project root in sys.path
@@ -33,7 +33,7 @@ def generate_markdown_report(
     md = []
     md.append("# Phase 6 — Model Evaluation & Benchmark Report")
     md.append("")
-    md.append(f"**Generated:** {datetime.utcnow().isoformat()}Z  ")
+    md.append(f"**Generated:** {datetime.now(timezone.utc).isoformat()}  ")
     md.append(f"**Evaluation Corpus:** Held-out Test Split (`data/splits/test.json`)  ")
     md.append(f"**Test Set Composition:** {eval_report['total_test_samples']} Records (100% Real Code, 0 Synthetic Mutations, 0 Data Leakage)")
     md.append("")

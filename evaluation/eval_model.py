@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 # Ensure project root in sys.path
@@ -159,7 +160,17 @@ def load_model_for_evaluation(
         trust_remote_code=True,
     )
 
-    if adapter_path and os.path.exists(adapter_path):
+    if adapter_path:
+        if not os.path.exists(adapter_path):
+            raise FileNotFoundError(f"[ERROR] Specified adapter path does not exist: {adapter_path}")
+        
+        # Check timestamp of adapter files
+        adapter_files = [os.path.join(adapter_path, f) for f in os.listdir(adapter_path) if f.endswith((".safetensors", ".bin", ".json"))]
+        if adapter_files:
+            latest_file = max(adapter_files, key=os.path.getmtime)
+            mtime_str = datetime.fromtimestamp(os.path.getmtime(latest_file), timezone.utc).isoformat()
+            print(f"[OK] Verified LoRA adapter timestamp: {mtime_str} ({os.path.basename(latest_file)})")
+
         print(f"[INFO] Merging LoRA adapter from: {adapter_path}")
         model = PeftModel.from_pretrained(model, adapter_path)
     else:

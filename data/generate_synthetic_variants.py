@@ -23,7 +23,7 @@ def extract_primary_function_name(code: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# 1. IDOR Mutators
+# 1. High-Volume IDOR Mutators
 # ---------------------------------------------------------------------------
 
 def generate_idor_variants(code: str, lang: str) -> List[Tuple[str, str]]:
@@ -31,17 +31,21 @@ def generate_idor_variants(code: str, lang: str) -> List[Tuple[str, str]]:
     fn_name = extract_primary_function_name(code)
     fn_str = f"Function `{fn_name}()`" if fn_name else "Method"
 
-    # Pattern A: Django / ORM user scoping removal
-    if re.search(r"get_object_or_404\([^)]*user=request\.user[^)]*\)", code):
-        m1 = re.sub(r",\s*user=request\.user", "", code)
-        m1 = re.sub(r"user=request\.user,\s*", "", m1)
+    # Pattern A: Django get_object_or_404 user scoping (Clean AST preservation)
+    if "get_object_or_404" in code:
+        # Match get_object_or_404 with user=request.user
+        m1 = re.sub(r',\s*user=request\.user\b', '', code)
+        m1 = re.sub(r'\buser=request\.user\s*,\s*', '', m1)
+        m1 = re.sub(r',\s*user_id=request\.user\.id\b', '', m1)
+        m1 = re.sub(r'\buser_id=request\.user\.id\s*,\s*', '', m1)
         if m1 != code:
             variants.append((m1, f"{fn_str} retrieves model instance directly without filtering by `request.user` (CWE-639 IDOR)."))
 
     # Pattern B: Scoped query filter parameter removal
     for param in ["user_id", "owner_id", "tenant_id", "account_id", "userId", "ownerId", "tenantId"]:
         if param in code:
-            m2 = re.sub(rf"(?:,\s*)?{param}\s*[:=]\s*[^,\s)]+", "", code, flags=re.IGNORECASE)
+            m2 = re.sub(rf",\s*{param}\s*[:=]\s*[^,\s)]+", "", code, flags=re.IGNORECASE)
+            m2 = re.sub(rf"\b{param}\s*[:=]\s*[^,\s)]+\s*,\s*", "", m2, flags=re.IGNORECASE)
             m2 = re.sub(rf"\.where\(['\"]{param}['\"],\s*[^)]+\)", "", m2, flags=re.IGNORECASE)
             m2 = re.sub(rf"(\band\s+{param}\s*=\s*[^;\n)]+)", "", m2, flags=re.IGNORECASE)
             if m2 != code:
@@ -61,7 +65,7 @@ def generate_idor_variants(code: str, lang: str) -> List[Tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# 2. Missing Authorization Mutators
+# 2. High-Volume Missing Authorization Mutators
 # ---------------------------------------------------------------------------
 
 def generate_missing_authz_variants(code: str, lang: str) -> List[Tuple[str, str]]:
@@ -69,20 +73,20 @@ def generate_missing_authz_variants(code: str, lang: str) -> List[Tuple[str, str
     fn_name = extract_primary_function_name(code)
     fn_str = f"Method `{fn_name}()`" if fn_name else "Handler"
 
-    # Pattern A: Decorators & Annotations
+    # Pattern A: Decorator removal
     decorators = re.findall(r"@(?:login_required|permission_required|user_passes_test|PreAuthorize|Secured|RolesAllowed|UseGuards|RequirePermission)(?:\([^)]*\))?\s*\n", code, re.IGNORECASE)
     for dec in decorators:
         m1 = code.replace(dec, "").strip()
         if m1 != code:
             variants.append((m1, f"{fn_str} executes sensitive action without `{dec.strip()}` authorization guard (CWE-862)."))
 
-    # Pattern B: Policy assertions
+    # Pattern B: Policy assertion removal
     if "$this->authorize" in code or "Gate::authorize" in code:
         m2 = re.sub(r"(?:\$this->authorize|Gate::authorize)\([^)]+\);\s*\n?", "", code)
         if m2 != code:
             variants.append((m2, f"{fn_str} mutates resource without invoking `$this->authorize()` policy check (CWE-862)."))
 
-    # Pattern C: Python / JS Guard clauses
+    # Pattern C: Guard clause removal
     guard_match = re.search(
         r"(if\s+(?:not\s+|!)?(?:request\.user|user|req\.user|Auth::user\(\))\.(?:is_authenticated|has_perm|hasPermission|can|isAdmin|is_admin)\([^)]*\)\s*:\s*\n(?:\s+raise[^\n]+\n|\s+return[^\n]+\n))",
         code, flags=re.IGNORECASE
@@ -101,7 +105,7 @@ def generate_missing_authz_variants(code: str, lang: str) -> List[Tuple[str, str
 
 
 # ---------------------------------------------------------------------------
-# 3. Incorrect Authorization Mutators
+# 3. High-Volume Incorrect Authorization Mutators
 # ---------------------------------------------------------------------------
 
 def generate_incorrect_authz_variants(code: str, lang: str) -> List[Tuple[str, str]]:
@@ -135,7 +139,7 @@ def generate_incorrect_authz_variants(code: str, lang: str) -> List[Tuple[str, s
 
 
 # ---------------------------------------------------------------------------
-# 4. Authentication Bypass Mutators
+# 4. High-Volume Authentication Bypass Mutators
 # ---------------------------------------------------------------------------
 
 def generate_auth_bypass_variants(code: str, lang: str) -> List[Tuple[str, str]]:
@@ -171,11 +175,22 @@ def generate_auth_bypass_variants(code: str, lang: str) -> List[Tuple[str, str]]
         if m5 != code:
             variants.append((m5, f"{fn_str} permits insecure `none` algorithm in JWT verification whitelist (CWE-287)."))
 
+    # Pattern D: Password hash verification bypass
+    if "password_verify(" in code:
+        m6 = re.sub(r"password_verify\([^)]+\)", "true /* bypassed */", code)
+        if m6 != code:
+            variants.append((m6, f"{fn_str} forces `password_verify()` to unconditionally return true, allowing arbitrary password bypass (CWE-287)."))
+
+    if "bcrypt.compare(" in code:
+        m7 = re.sub(r"bcrypt\.compare\([^)]+\)", "Promise.resolve(true)", code)
+        if m7 != code:
+            variants.append((m7, f"{fn_str} forces `bcrypt.compare()` to resolve true without verifying password hash (CWE-287)."))
+
     return variants
 
 
 # ---------------------------------------------------------------------------
-# 5. Clean Remediation Mutators
+# 5. High-Volume Clean Remediation Mutators
 # ---------------------------------------------------------------------------
 
 def generate_clean_remediations(code: str, vuln_class: str, lang: str) -> List[Tuple[str, str]]:

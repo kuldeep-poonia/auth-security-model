@@ -37,7 +37,7 @@ from data.generate_synthetic_variants import (
 )
 
 
-def run_synthetic_generation_and_validation(max_synthetic_target: int = 4200):
+def run_synthetic_generation_and_validation(target_accepted_per_class: int = 50):
     print("=" * 80)
     print("  LAUNCHING HARDCORE-VALIDATED SYNTHETIC DATA GENERATION PIPELINE")
     print("=" * 80 + "\n")
@@ -46,23 +46,25 @@ def run_synthetic_generation_and_validation(max_synthetic_target: int = 4200):
     with open(train_path, "r", encoding="utf-8") as f:
         real_train_data = json.load(f)
 
-    print(f"[INFO] Loaded {len(real_train_data)} real base training examples.")
+    # Filter out any previously generated synthetic examples so we build cleanly from real base code
+    real_base_examples = [r for r in real_train_data if r.get("source") != "hardcore_validated_synthetic"]
+    print(f"[INFO] Loaded {len(real_base_examples)} verified real base training examples.")
 
     tracker = ValidationTracker()
 
     existing_hashes: Set[str] = set()
-    existing_token_sets: List[Set[str]] = []
+    synthetic_token_sets: List[Set[str]] = []
 
-    for r in real_train_data:
-        code = r.get("code", "")
-        existing_hashes.add(compute_normalized_hash(code))
-        existing_token_sets.append(compute_token_set(code))
+    for r in real_base_examples:
+        existing_hashes.add(compute_normalized_hash(r.get("code", "")))
 
     accepted_synthetic_records = []
+    accepted_by_class = defaultdict(int)
 
     # Iterate over real base records to produce variants
-    for base_rec in real_train_data:
+    for base_rec in real_base_examples:
         base_code = base_rec.get("code", "")
+        base_hash = compute_normalized_hash(base_code)
         lang = base_rec.get("language", "generic")
         base_is_vuln = base_rec.get("is_vulnerable", False)
         base_class = base_rec.get("vuln_class", "none")
@@ -124,7 +126,7 @@ def run_synthetic_generation_and_validation(max_synthetic_target: int = 4200):
                 continue
 
             # --- Gate 3: Similarity & Duplicate Rejection ---
-            if not check_gate3_similarity(cand_code, existing_hashes, existing_token_sets):
+            if not check_gate3_similarity(cand_code, base_hash, existing_hashes, synthetic_token_sets):
                 tracker.record_rejection(3, v_class, lang)
                 continue
 
@@ -140,8 +142,9 @@ def run_synthetic_generation_and_validation(max_synthetic_target: int = 4200):
 
             # Survived ALL 5 Gates -> Accept!
             tracker.record_accepted(v_class, lang)
+            accepted_by_class[v_class] += 1
             existing_hashes.add(compute_normalized_hash(cand_code))
-            existing_token_sets.append(compute_token_set(cand_code))
+            synthetic_token_sets.append(compute_token_set(cand_code))
 
             rec_id = f"synth-{v_class}-{lang}-{len(accepted_synthetic_records):05d}"
             accepted_synthetic_records.append({
@@ -171,7 +174,7 @@ def run_synthetic_generation_and_validation(max_synthetic_target: int = 4200):
     final_synth_accepted = synth_vuln[:min_synth] + synth_clean[:min_synth]
 
     # Combine with real training data
-    updated_train = real_train_data + final_synth_accepted
+    updated_train = real_base_examples + final_synth_accepted
     random.seed(42)
     random.shuffle(updated_train)
 
@@ -218,14 +221,15 @@ def run_synthetic_generation_and_validation(max_synthetic_target: int = 4200):
     print(f"{'TOTAL OVERALL':<18} | {'ALL':<11} | {total_gen_all:<5} | {total_g1_all:<7} | {total_g2_all:<7} | {total_g3_all:<7} | {total_g4_all:<8} | {total_g5_all:<7} | {total_acc_all:<8} | {overall_rej_pct:>6.1f}%\n")
 
     print("=" * 80)
-    print("  FINAL DATASET RATIO & BALANCE SUMMARY")
+    print("  FINAL DATASET RECONCILIATION & BALANCE SUMMARY")
     print("=" * 80)
     vuln_cnt = sum(1 for r in updated_train if r["is_vulnerable"])
     clean_cnt = sum(1 for r in updated_train if not r["is_vulnerable"])
-    print(f"• Real Base Examples in Train: {len(real_train_data)} records (50.0% Vuln / 50.0% Clean)")
-    print(f"• Accepted Synthetic Examples: {len(final_synth_accepted)} records (50.0% Vuln / 50.0% Clean)")
-    print(f"• Synthetic-to-Real Ratio: {len(final_synth_accepted) / len(real_train_data):.2f}:1 (Target <= 1.5:1)")
-    print(f"• Total Expanded Train Split: {len(updated_train)} records (Vuln={vuln_cnt}, Clean={clean_cnt})")
+    print(f"• Real Base Examples in Train: {len(real_base_examples)} records (Vuln={sum(1 for r in real_base_examples if r['is_vulnerable'])}, Clean={sum(1 for r in real_base_examples if not r['is_vulnerable'])})")
+    print(f"• Total Validated Accepted Synthetic: {len(accepted_synthetic_records)} records (Vuln={len(synth_vuln)}, Clean={len(synth_clean)})")
+    print(f"• Integrated Synthetic (50:50 Balanced): {len(final_synth_accepted)} records (Vuln={len(final_synth_accepted)//2}, Clean={len(final_synth_accepted)//2})")
+    print(f"• Synthetic-to-Real Ratio: {len(final_synth_accepted) / len(real_base_examples):.4f}:1 (Target <= 1.5:1)")
+    print(f"• Total Final Train Split: {len(updated_train)} records (Vuln={vuln_cnt}, Clean={clean_cnt})")
     print(f"• Validation Split: 234 records (100% Real Code, Untouched)")
     print(f"• Test Split: 236 records (100% Real Code, Untouched)")
     print(f"• TOTAL DATASET SIZE: {len(updated_train) + 234 + 236} records")

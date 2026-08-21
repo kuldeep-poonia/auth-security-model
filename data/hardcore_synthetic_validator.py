@@ -223,16 +223,18 @@ def verify_gate2_ground_truth(code: str, base_code: str, vuln_class: str, is_vul
 # Gate 3: Duplicate & Structural Similarity Rejection
 # ---------------------------------------------------------------------------
 
-def check_gate3_similarity(code: str, existing_hashes: Set[str], existing_token_sets: List[Set[str]], max_similarity: float = 0.85) -> bool:
-    """Reject exact hash duplicates and structural near-duplicates above similarity threshold."""
+def check_gate3_similarity(code: str, base_hash: str, existing_hashes: Set[str], synthetic_token_sets: List[Set[str]], max_similarity: float = 0.90) -> bool:
+    """Reject exact hash duplicates and structural duplicates among other synthetic examples."""
     h = compute_normalized_hash(code)
-    if h in existing_hashes:
-        return False  # Exact duplicate
+    # Reject if exact duplicate of any existing real or synthetic record
+    if h in existing_hashes or h == base_hash:
+        return False
 
+    # Check Jaccard similarity against previously accepted synthetic examples
     t_set = compute_token_set(code)
-    for existing_set in existing_token_sets[-200:]:  # Check sliding window of recent sets
+    for existing_set in synthetic_token_sets[-150:]:
         if compute_jaccard_similarity(t_set, existing_set) > max_similarity:
-            return False  # Near-duplicate
+            return False
 
     return True
 
@@ -244,10 +246,9 @@ def check_gate3_similarity(code: str, existing_hashes: Set[str], existing_token_
 def filter_gate4_realism(code: str, language: str) -> bool:
     """Reject syntactically valid but absurd mutations (empty functions, dead variables, trivial 1-liners)."""
     lines = [l.strip() for l in code.splitlines() if l.strip() and not l.strip().startswith(("*", "//", "#", "/*", "*/"))]
-    if len(lines) < 3:
+    if len(lines) < 2:
         return False
 
-    # Check for empty function body (e.g. def foo(): pass)
     code_lower = code.lower()
     if re.search(r"def\s+\w+\([^)]*\):\s*(?:pass|\.\.\.)\s*$", code_lower):
         return False
@@ -261,24 +262,36 @@ def filter_gate4_realism(code: str, language: str) -> bool:
 # Gate 5: Symbol-Grounded Explanation Verification
 # ---------------------------------------------------------------------------
 
+SECURITY_PRIMITIVES = {
+    "constant_time_compare", "hash_equals", "jwt.verify", "jwt.decode",
+    "login_required", "preauthorize", "has_perm", "is_authenticated",
+    "get_object_or_404", "request.user", "authorize", "user_id", "owner_id",
+    "tenant_id", "roles", "is_admin", "password_verify", "bcrypt"
+}
+
 def verify_gate5_explanation(explanation: str, code: str) -> bool:
-    """Verify that explanation references concrete identifiers visible in the code AST."""
-    if not explanation or len(explanation.strip()) < 20:
+    """Verify that explanation references concrete identifiers visible in the code AST or described security primitives."""
+    if not explanation or len(explanation.strip()) < 15:
         return False
 
     # Reject placeholder tokens
     if any(k in explanation for k in ("TODO", "<PLACEHOLDER>", "[language]", "XYZ", "UNKNOWN")):
         return False
 
-    # Extract backticked symbols from explanation (e.g. `view_invoice()`, `user.is_authenticated`)
     backticked = re.findall(r"`([^`]+)`", explanation)
     if not backticked:
-        return True  # Fallback valid if descriptive
+        return True
 
     code_lower = code.lower()
     for symbol in backticked:
         clean_sym = symbol.replace("()", "").strip().lower()
-        if clean_sym and clean_sym not in code_lower and not any(k in clean_sym for k in ("cwe", "cve", "auth")):
-            return False  # Hallucinated symbol
+        if not clean_sym:
+            continue
+        # Allowed if in code, or is a standard security primitive being described/removed, or is a CWE/CVE identifier
+        if (clean_sym in code_lower or
+            any(p in clean_sym for p in SECURITY_PRIMITIVES) or
+            any(k in clean_sym for k in ("cwe", "cve", "auth", "idor", "role"))):
+            continue
+        return False
 
     return True

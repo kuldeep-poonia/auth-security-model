@@ -25,7 +25,12 @@ VALID_VULN_CLASSES = {"IDOR", "auth_bypass", "missing_authz_check", "incorrect_a
 
 def format_user_prompt(code: str, language: str) -> str:
     """Format input code snippet and language into user prompt."""
-    return f"Language: {language}\n\nCode:\n```{language}\n{code}\n```"
+    import re
+    if not code:
+        code = ""
+    # Normalize and collapse excessive blank lines from diff scraping
+    sanitized_code = re.sub(r"\n{3,}", "\n\n", code).strip()
+    return f"Language: {language}\n\nCode:\n```{language}\n{sanitized_code}\n```"
 
 
 def derive_calibrated_confidence(record: Dict[str, Any]) -> float:

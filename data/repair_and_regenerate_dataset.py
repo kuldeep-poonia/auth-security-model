@@ -99,35 +99,75 @@ def is_valid_source_code(code: str, language: str) -> bool:
 
 
 def generate_semantic_clean_explanation(record: Dict[str, Any]) -> str:
-    """Generate concise, code-grounded semantic explanation for clean code units."""
+    """Generate symbol-grounded semantic explanation for a clean code unit directly referencing visible AST elements."""
     code = record.get("code", "")
     lang = record.get("language", "generic")
-    code_lower = code.lower()
+    lines = code.splitlines()
+    code_text = "\n".join(lines)
 
-    if "session" in code_lower and any(k in code_lower for k in ("user_id", "owner", "auth", "get", "login")):
-        return "Enforces session-based identity validation and scopes resource access to the authenticated user."
-    elif any(k in code_lower for k in ("@preauthorize", "has_perm", "haspermission", "can_access", "permission", "canlogin", "canedit")):
-        return "Enforces explicit role-based access control and authority validation before executing action."
-    elif any(k in code_lower for k in ("bcrypt", "hash_equals", "password_verify", "timingsafeequal", "hmac")):
-        return "Uses timing-safe cryptographic comparison and secure password hashing algorithms."
-    elif any(k in code_lower for k in ("where", "findby", "query", "filter")) and any(k in code_lower for k in ("user_id", "owner_id", "tenant_id", "account_id")):
-        return "Scopes database query with explicit tenant/user ownership constraint to prevent unauthorized object access."
-    elif any(k in code_lower for k in ("jwt", "bearer", "token", "validate_token", "authenticate")):
-        return "Validates cryptographic signature and claims on the authentication token before granting access."
-    elif any(k in code_lower for k in ("middleware", "guard", "interceptor", "filter")):
-        return "Implements standard security middleware verifying authentication state prior to handler execution."
-    elif any(k in code_lower for k in ("csrf", "form_security_validate", "token_check")):
-        return "Validates anti-CSRF request tokens and re-authenticates the current user session."
-    elif any(k in code_lower for k in ("policy", "gate", "authorize")):
-        return "Applies framework policy authorization check ensuring caller has appropriate permissions."
-    elif any(k in code_lower for k in ("login", "authenticate", "signin")):
-        return "Implements secure credential validation and session initialization with rate-limiting and renewal."
-    elif "fixed" in str(record.get("id", "")) or "patch" in str(record.get("id", "")):
-        return "Contains patched authorization check preventing privilege escalation and unauthorized access."
-    elif any(k in code_lower for k in ("format", "parse", "convert", "util", "helper", "tostring")):
-        return "Pure utility helper function containing no authorization boundaries or security-sensitive operations."
+    # 1. Detect Class / Function names
+    class_match = re.search(r"\bclass\s+(\w+)", code_text)
+    class_name = class_match.group(1) if class_match else None
+
+    func_match = re.search(r"\b(?:function|def|func)\s+(?:[\w\*\s]+\s+)?(\w+)\s*\(", code_text)
+    func_name = func_match.group(1) if func_match else None
+
+    # 2. Detect Decorators / Annotations
+    decorators = re.findall(r"@(\w+)", code_text)
+
+    # 3. Detect key API calls or statements in the actual code
+    key_calls = []
+    if "form_security_validate" in code_text:
+        key_calls.append("form_security_validate()")
+    if "auth_reauthenticate" in code_text:
+        key_calls.append("auth_reauthenticate()")
+    if "access_ensure_project_level" in code_text:
+        key_calls.append("access_ensure_project_level()")
+    if "handle_no_permission" in code_text:
+        key_calls.append("handle_no_permission()")
+    if "is_authenticated" in code_text:
+        key_calls.append("user.is_authenticated")
+    if "GetRoleManager" in code_text:
+        key_calls.append("GetRoleManager()")
+    if "canActivate" in code_text:
+        key_calls.append("canActivate()")
+    if "has_perm" in code_text:
+        key_calls.append("has_perm()")
+    if "checkPassword" in code_text:
+        key_calls.append("checkPassword()")
+    if "password_verify" in code_text:
+        key_calls.append("password_verify()")
+    if "bcrypt" in code_text:
+        key_calls.append("bcrypt")
+    if "hash_equals" in code_text:
+        key_calls.append("hash_equals()")
+    if "tenantId" in code_text or "tenant_id" in code_text:
+        key_calls.append("tenant_id isolation")
+    if "roles.some" in code_text or "has_role" in code_text:
+        key_calls.append("role validation")
+
+    # 4. Synthesize Grounded Explanation referencing real code symbols
+    if class_name and ("Test" in class_name or "fixture" in code_text):
+        return f"Test fixture class `{class_name}` defining test assertions and test data setups."
+    elif class_name and any(d in decorators for d in ("Entity", "Table", "DataObject")):
+        return f"Data model entity `{class_name}` defining database schema fields and property mappings."
+    elif class_name and ("Guard" in class_name or "Strategy" in class_name or "Interceptor" in class_name):
+        fn = func_name if func_name else "canActivate"
+        return f"Guard `{class_name}` implementing `{fn}()` to validate request context and access permissions."
+    elif func_name and key_calls:
+        calls_str = ", ".join(key_calls[:2])
+        return f"Function `{func_name}()` explicitly checking authorization via {calls_str}."
+    elif key_calls:
+        calls_str = ", ".join(key_calls[:2])
+        return f"Script enforcing security validation via {calls_str}."
+    elif func_name:
+        return f"Function `{func_name}()` implementing expected {lang} application logic with defined boundaries."
+    elif class_name:
+        return f"Class `{class_name}` encapsulating application logic and standard utility methods."
     else:
-        return f"Standard clean {lang} code unit implementing expected application logic with appropriate boundaries."
+        first_statement = [l.strip() for l in lines if l.strip() and not l.strip().startswith(("*", "//", "#", "import", "package", "using"))][:1]
+        stmt = first_statement[0][:40] if first_statement else "standard statements"
+        return f"Clean {lang} code snippet executing `{stmt}` without security or privilege boundaries."
 
 
 def repair_and_reextract_dataset():

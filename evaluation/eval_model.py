@@ -151,9 +151,10 @@ def load_model_for_evaluation(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    print(f"[INFO] Loading tokenizer: {adapter_path or model_id}")
+    tok_source = adapter_path if (adapter_path and os.path.exists(os.path.join(adapter_path, "tokenizer_config.json"))) else model_id
+    print(f"[INFO] Loading tokenizer from source: {tok_source}")
     tokenizer = AutoTokenizer.from_pretrained(
-        adapter_path if (adapter_path and os.path.exists(adapter_path)) else model_id,
+        tok_source,
         trust_remote_code=True,
     )
     tokenizer.padding_side = "left"  # Crucial for batched causal decoder generation

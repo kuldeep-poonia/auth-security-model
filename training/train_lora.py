@@ -243,17 +243,42 @@ def train(args):
 
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    # Configure Model Loading (0.5B model fits completely in native FP16 on single GPU in < 1GB VRAM)
+    # Configure Model Loading
     device_map = {"": 0} if torch.cuda.is_available() else None
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
-    print(f"[INFO] Loading base model in native FP16: {args.model_id} (weight memory: 959 MB)")
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
-        torch_dtype=torch_dtype,
-        device_map=device_map,
-        trust_remote_code=True,
-    )
+    use_4bit = args.use_qlora or args.load_in_4bit
+    if not use_4bit and "3b" in args.model_id.lower() and torch.cuda.is_available():
+        # Auto-enable 4-bit QLoRA on 3B+ models to ensure safe headroom on 16GB GPUs
+        use_4bit = True
+        print("[INFO] Auto-enabling 4-Bit NF4 QLoRA for 3B model to guarantee <5GB VRAM usage on T4 GPU.")
+
+    if use_4bit and torch.cuda.is_available():
+        from transformers import BitsAndBytesConfig
+        from peft import prepare_model_for_kbit_training
+
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        print(f"[INFO] Loading base model in 4-Bit NF4 QLoRA: {args.model_id} (weight memory: ~1.8 GB)")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            quantization_config=bnb_config,
+            device_map=device_map,
+            trust_remote_code=True,
+        )
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    else:
+        print(f"[INFO] Loading base model in native FP16: {args.model_id}")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            torch_dtype=torch_dtype,
+            device_map=device_map,
+            trust_remote_code=True,
+        )
     model.config.use_cache = False
 
     # Configure LoRA
@@ -541,6 +566,16 @@ def parse_args():
         "--smoke_test",
         action="store_true",
         help="Run a 2-step plumbing check on a 10-item subset",
+    )
+    parser.add_argument(
+        "--use_qlora",
+        action="store_true",
+        help="Load base model in 4-bit NF4 quantized mode (QLoRA)",
+    )
+    parser.add_argument(
+        "--load_in_4bit",
+        action="store_true",
+        help="Alias for --use_qlora",
     )
     parser.add_argument(
         "--check_gpu_bnb",

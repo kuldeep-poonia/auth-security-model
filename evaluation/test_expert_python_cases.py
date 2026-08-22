@@ -37,7 +37,7 @@ except Exception:
 
 from peft import PeftModel
 from training.dataset_formatter import format_user_prompt, SYSTEM_PROMPT
-from evaluation.eval_model import extract_json_from_response, load_model_for_evaluation
+from evaluation.eval_model import extract_json_from_response, load_model_for_evaluation, resolve_best_checkpoint
 
 
 EXPERT_TEST_CASES = [
@@ -185,20 +185,11 @@ def run_expert_python_challenge(model_path: str = "checkpoints", model_id: str =
     print("  EXPERT PYTHON AUTHORIZATION SECURITY CHALLENGE")
     print("=" * 80)
 
-    # Automatic checkpoint discovery
-    adapter_dir = model_path
-    if os.path.exists(adapter_dir) and not os.path.exists(os.path.join(adapter_dir, "adapter_config.json")):
-        import glob
-        subdirs = glob.glob(os.path.join(adapter_dir, "checkpoint-*"))
-        if subdirs:
-            def get_step(p):
-                m = re.search(r"checkpoint-(\d+)", p)
-                return int(m.group(1)) if m else -1
-            adapter_dir = max(subdirs, key=get_step)
-            print(f"[INFO] Selected latest checkpoint: {adapter_dir}")
+    # Automatic best checkpoint discovery
+    adapter_dir = resolve_best_checkpoint(model_path)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[INFO] Loading fine-tuned model on {device}...")
+    print(f"[INFO] Loading fine-tuned model on {device} (adapter: {adapter_dir})...")
     model, tokenizer = load_model_for_evaluation(model_id=model_id, adapter_path=adapter_dir, device=device)
 
     print("\n" + "=" * 80)

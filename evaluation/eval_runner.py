@@ -11,7 +11,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import torch
-from evaluation.eval_model import load_model_for_evaluation, run_evaluation_on_split
+from evaluation.eval_model import load_model_for_evaluation, run_evaluation_on_split, resolve_best_checkpoint
 
 
 def generate_markdown_report(
@@ -189,10 +189,11 @@ def main():
     print(f"[INFO] Total test records loaded: {len(test_records)}")
 
     # 1. Evaluate Fine-Tuned LoRA Model
-    print(f"\n=== Evaluating Fine-Tuned Model ({args.adapter_path}) ===")
+    adapter_dir = resolve_best_checkpoint(args.adapter_path)
+    print(f"\n=== Evaluating Fine-Tuned Model ({adapter_dir}) ===")
     ft_model, ft_tokenizer = load_model_for_evaluation(
         model_id=args.model_id,
-        adapter_path=args.adapter_path,
+        adapter_path=adapter_dir,
         device=args.device,
     )
     ft_report, ft_predictions = run_evaluation_on_split(

@@ -292,7 +292,64 @@ def run_evaluation_on_split(
         "confidence_calibration": calibration_metrics,
     }
 
-    return evaluation_report, evaluated_items
+def resolve_best_checkpoint(adapter_dir: str) -> str:
+    """Resolve the optimal checkpoint or final adapter from a directory.
+    
+    Priority order:
+    1. If adapter_dir directly contains adapter_config.json, use it.
+    2. If adapter_dir/final_adapter exists and contains adapter_config.json, use it.
+    3. If adapter_dir/trainer_state.json exists, read 'best_model_checkpoint'.
+    4. Search subdirectories for trainer_state.json to find 'best_model_checkpoint'.
+    5. Fallback: Select the checkpoint-* with highest step number.
+    """
+    if not os.path.exists(adapter_dir):
+        return adapter_dir
+
+    if os.path.exists(os.path.join(adapter_dir, "adapter_config.json")):
+        return adapter_dir
+
+    final_adapter = os.path.join(adapter_dir, "final_adapter")
+    if os.path.exists(os.path.join(final_adapter, "adapter_config.json")):
+        print(f"[INFO] Found finalized best adapter at: {final_adapter}")
+        return final_adapter
+
+    state_file = os.path.join(adapter_dir, "trainer_state.json")
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            best_ckpt = state.get("best_model_checkpoint")
+            if best_ckpt and os.path.exists(best_ckpt) and os.path.exists(os.path.join(best_ckpt, "adapter_config.json")):
+                print(f"[INFO] Selected best checkpoint from trainer_state.json: {best_ckpt}")
+                return best_ckpt
+        except Exception:
+            pass
+
+    import glob
+    subdirs = glob.glob(os.path.join(adapter_dir, "checkpoint-*"))
+    if subdirs:
+        for s in sorted(subdirs, reverse=True):
+            sub_state = os.path.join(s, "trainer_state.json")
+            if os.path.exists(sub_state):
+                try:
+                    with open(sub_state, "r", encoding="utf-8") as f:
+                        st = json.load(f)
+                    best_ckpt = st.get("best_model_checkpoint")
+                    if best_ckpt and os.path.exists(best_ckpt) and os.path.exists(os.path.join(best_ckpt, "adapter_config.json")):
+                        print(f"[INFO] Selected best checkpoint from {s}/trainer_state.json: {best_ckpt}")
+                        return best_ckpt
+                except Exception:
+                    pass
+
+        def get_step(p):
+            m = re.search(r"checkpoint-(\d+)", p)
+            return int(m.group(1)) if m else -1
+
+        latest = max(subdirs, key=get_step)
+        print(f"[INFO] Fallback to latest checkpoint: {latest}")
+        return latest
+
+    return adapter_dir
 
 
 def main():
@@ -307,18 +364,8 @@ def main():
     parser.add_argument("--run_baseline", action="store_true", help="Also evaluate zero-shot base model")
     args = parser.parse_args()
 
-    adapter_dir = args.adapter_path if args.adapter_path else args.model_path
-
-    # If adapter_dir is a parent folder containing checkpoint-* subdirs, find the latest
-    if os.path.exists(adapter_dir) and not os.path.exists(os.path.join(adapter_dir, "adapter_config.json")):
-        import glob
-        subdirs = glob.glob(os.path.join(adapter_dir, "checkpoint-*"))
-        if subdirs:
-            def get_step(p):
-                m = re.search(r"checkpoint-(\d+)", p)
-                return int(m.group(1)) if m else -1
-            adapter_dir = max(subdirs, key=get_step)
-            print(f"[INFO] Selected latest checkpoint: {adapter_dir}")
+    raw_adapter = args.adapter_path if args.adapter_path else args.model_path
+    adapter_dir = resolve_best_checkpoint(raw_adapter)
 
     os.makedirs(args.output_dir, exist_ok=True)
 

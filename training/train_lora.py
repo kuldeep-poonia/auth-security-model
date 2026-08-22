@@ -548,8 +548,8 @@ def parse_args():
     parser.add_argument(
         "--max_length",
         type=int,
-        default=384,
-        help="Maximum tokenized sequence length",
+        default=512,
+        help="Maximum tokenized sequence length (default: 512)",
     )
     parser.add_argument(
         "--lora_r",
@@ -566,8 +566,8 @@ def parse_args():
     parser.add_argument(
         "--vuln_loss_weight",
         type=float,
-        default=3.7,
-        help="Loss weight multiplier for vulnerable examples to compensate for class imbalance (default: 3.7)",
+        default=1.0,
+        help="Loss weight multiplier for vulnerable examples (default: 1.0 for balanced dataset)",
     )
     parser.add_argument(
         "--smoke_test",

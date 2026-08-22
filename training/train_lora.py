@@ -296,6 +296,13 @@ def train(args):
     if hasattr(model, "base_model"):
         model.base_model.config.use_cache = False
 
+    # Prevent Trainer from wrapping in torch.nn.DataParallel on multi-GPU systems (incompatible with bitsandbytes 4-bit)
+    if torch.cuda.is_available():
+        model.is_parallelizable = True
+        model.model_parallel = True
+    if hasattr(model, "base_model"):
+        model.base_model.config.use_cache = False
+
     if torch.cuda.is_available():
         model.enable_input_require_grads()
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})

@@ -839,29 +839,46 @@ def build_and_save_10k_dataset():
             seen_hashes.add(h)
             deduped.append(s)
 
-    # Balance classes exactly 50/50
-    vuln_items = [s for s in deduped if s["is_vulnerable"]]
-    clean_items = [s for s in deduped if not s["is_vulnerable"]]
-
-    min_count = min(len(vuln_items), len(clean_items))
+    # Disjoint Entity Partitioning
+    # 60 entities: 46 for Train, 7 for Val, 7 for Test
+    all_entity_names = [e[0] for e in ENTITIES_60]
     random.seed(42)
-    random.shuffle(vuln_items)
-    random.shuffle(clean_items)
+    random.shuffle(all_entity_names)
+    
+    val_entities = set(all_entity_names[:7])
+    test_entities = set(all_entity_names[7:14])
+    train_entities = set(all_entity_names[14:])
 
-    balanced_dataset = vuln_items[:min_count] + clean_items[:min_count]
-    random.shuffle(balanced_dataset)
+    def get_sample_entity(s):
+        sid = s["id"]
+        for e in all_entity_names:
+            if e in sid:
+                return e
+        return "other"
+
+    train_raw = [s for s in deduped if get_sample_entity(s) in train_entities]
+    val_raw = [s for s in deduped if get_sample_entity(s) in val_entities]
+    test_raw = [s for s in deduped if get_sample_entity(s) in test_entities]
+
+    def balance_split(split_list):
+        vuln = [s for s in split_list if s["is_vulnerable"]]
+        clean = [s for s in split_list if not s["is_vulnerable"]]
+        m = min(len(vuln), len(clean))
+        random.seed(42)
+        random.shuffle(vuln)
+        random.shuffle(clean)
+        balanced = vuln[:m] + clean[:m]
+        random.shuffle(balanced)
+        return balanced
+
+    train_data = balance_split(train_raw)
+    val_data = balance_split(val_raw)
+    test_data = balance_split(test_raw)
 
     print(f"Total Unique Valid Samples: {len(deduped)}")
-    print(f"Balanced Dataset Total: {len(balanced_dataset)} ({min_count} Vulnerable / {min_count} Clean)")
-
-    # 80% Train, 10% Val, 10% Test
-    n = len(balanced_dataset)
-    train_end = int(n * 0.80)
-    val_end = int(n * 0.90)
-
-    train_data = balanced_dataset[:train_end]
-    val_data = balanced_dataset[train_end:val_end]
-    test_data = balanced_dataset[val_end:]
+    print(f"• Train Split: {len(train_data)} samples (Entities: {len(train_entities)})")
+    print(f"• Val Split:   {len(val_data)} samples (Entities: {len(val_entities)}) [100% UNSEEN DOMAIN]")
+    print(f"• Test Split:  {len(test_data)} samples (Entities: {len(test_entities)}) [100% UNSEEN DOMAIN]")
 
     os.makedirs(SPLITS_DIR, exist_ok=True)
     with open(os.path.join(SPLITS_DIR, "train.json"), "w", encoding="utf-8") as f:
@@ -871,9 +888,6 @@ def build_and_save_10k_dataset():
     with open(os.path.join(SPLITS_DIR, "test.json"), "w", encoding="utf-8") as f:
         json.dump(test_data, f, indent=2)
 
-    print(f"• Train Split: {len(train_data)} samples")
-    print(f"• Val Split:   {len(val_data)} samples")
-    print(f"• Test Split:  {len(test_data)} samples")
     print("=" * 80)
 
 

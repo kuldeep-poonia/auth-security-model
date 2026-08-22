@@ -330,8 +330,8 @@ def train(args):
         "save_steps": args.save_steps,
         "save_total_limit": 5,
         "load_best_model_at_end": True if (val_dataset and not args.smoke_test) else False,
-        "metric_for_best_model": "eval_f1" if (val_dataset and not args.smoke_test) else "eval_loss",
-        "greater_is_better": True if (val_dataset and not args.smoke_test) else False,
+        "metric_for_best_model": "eval_loss" if (val_dataset and not args.smoke_test) else "eval_loss",
+        "greater_is_better": False,
         "fp16": torch.cuda.is_available(),
         "bf16": False,
         "gradient_checkpointing": True if torch.cuda.is_available() else False,
@@ -368,6 +368,7 @@ def train(args):
 
     def compute_metrics(eval_pred):
         predictions, labels = eval_pred
+        # Do not early stop prematurely - allow full complete epoch training
         true_pos, false_pos, true_neg, false_neg = 0, 0, 0, 0
 
         for pred_ids, label_ids in zip(predictions, labels):
@@ -422,8 +423,7 @@ def train(args):
                 )
 
     callbacks = [EvalLoggingCallback()]
-    if val_dataset and not args.smoke_test:
-        callbacks.append(EarlyStoppingCallback(early_stopping_patience=6, early_stopping_threshold=0.001))
+    # Training runs for full configured epochs without premature early stopping
 
     # Initialize WeightedTrainer with class-weighted loss support
     trainer = WeightedTrainer(

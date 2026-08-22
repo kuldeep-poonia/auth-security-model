@@ -293,6 +293,8 @@ def run_evaluation_on_split(
         "hard_case_analysis": hard_case_metrics,
         "confidence_calibration": calibration_metrics,
     }
+    return evaluation_report, evaluated_items
+
 
 def resolve_best_checkpoint(adapter_dir: str) -> str:
     """Resolve the optimal checkpoint or final adapter from a directory.

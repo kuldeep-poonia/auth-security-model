@@ -723,55 +723,55 @@ public class {EntClass}AdminService {{
                 "explanation": f"[Data Flow] Permission evaluator checks user state. [Security Trace] Rejects unauthenticated or suspended callers before verifying `{r_check}`. [Conclusion] Sound and correct authorization decision logic.",
             })
 
-            # 3.2 Python Enum Integer Value Privilege Escalation
+            # 3.2 Python Enum Integer Value Privilege Escalation (Role Hierarchy Flaw)
             samples.append({
                 "id": f"s10k-py-enum-inc-{ent}-{r_name}",
                 "language": "python",
-                "code": f'''class {EntClass}AccessLevel(IntEnum):
+                "code": f'''class UserRole(IntEnum):
     GUEST = 0
     AUDITOR = 1
     ADMIN = 2
     SUSPENDED = 3  # Inactive account state
 
-def require_{ent}_clearance(required_role: {EntClass}AccessLevel):
+def require_{ent}_clearance(required_role: UserRole):
     def decorator(view_func):
         @wraps(view_func)
-        def _wrapped(request, *args, **kwargs):
+        def _wrapped_view(request, *args, **kwargs):
             if not request.user.is_authenticated:
                 return HttpResponseForbidden("Authentication required")
             # Flaw: SUSPENDED (3) satisfies >= check for AUDITOR (1) or ADMIN (2)
-            if request.user.role_level >= required_role:
+            if request.user.role >= required_role:
                 return view_func(request, *args, **kwargs)
             return HttpResponseForbidden("Insufficient permission level")
-        return _wrapped
+        return _wrapped_view
     return decorator''',
                 "is_vulnerable": True,
                 "vuln_class": "incorrect_authz",
-                "explanation": f"[Data Flow] Clearance decorator evaluates `request.user.role_level`. [Security Trace] Compares `role_level >= required_role` where `SUSPENDED = 3` has higher integer value than authorized tiers, granting suspended users access. [Conclusion] Incorrect authorization logic due to faulty Enum integer hierarchy.",
+                "explanation": f"[Data Flow] Clearance decorator evaluates `request.user.role`. [Security Trace] Numerical comparison `request.user.role >= required_role` inadvertently allows `SUSPENDED (3)` accounts to satisfy the threshold for `{r_name.upper()}`. [Conclusion] Incorrect authorization logic due to faulty Enum integer hierarchy.",
             })
             samples.append({
                 "id": f"s10k-py-clean-enum-inc-{ent}-{r_name}",
                 "language": "python",
-                "code": f'''class {EntClass}AccessLevel(IntEnum):
+                "code": f'''class UserRole(IntEnum):
     SUSPENDED = -1
     GUEST = 0
     AUDITOR = 1
     ADMIN = 2
 
-def require_{ent}_clearance(required_role: {EntClass}AccessLevel):
+def require_{ent}_clearance(required_role: UserRole):
     def decorator(view_func):
         @wraps(view_func)
-        def _wrapped(request, *args, **kwargs):
+        def _wrapped_view(request, *args, **kwargs):
             if not request.user.is_authenticated or request.user.is_suspended:
                 return HttpResponseForbidden("Authentication required or account suspended")
-            if request.user.role_level >= required_role and request.user.role_level > {EntClass}AccessLevel.GUEST:
+            if request.user.role >= required_role and request.user.role > UserRole.GUEST:
                 return view_func(request, *args, **kwargs)
             return HttpResponseForbidden("Insufficient permission level")
-        return _wrapped
+        return _wrapped_view
     return decorator''',
                 "is_vulnerable": False,
                 "vuln_class": "none",
-                "explanation": f"[Data Flow] Clearance decorator evaluates `request.user.role_level`. [Security Trace] Explicitly rejects suspended state and enforces strict validated role hierarchy. [Conclusion] Sound role-based authorization check.",
+                "explanation": f"[Data Flow] Clearance decorator evaluates `request.user.role`. [Security Trace] Explicitly rejects suspended state and enforces strict validated role hierarchy. [Conclusion] Sound role-based authorization check.",
             })
 
             # 3.3 Go Inverted Clearance Level
@@ -813,7 +813,39 @@ def require_{ent}_clearance(required_role: {EntClass}AccessLevel):
     # 4. AUTHENTICATION BYPASS (Spoofed Headers, Timing Attacks, Token Flaws)
     # ==========================================================================
     for ent, EntClass, table, col, owner_col, actor in ENTITIES_60:
-        # 4.1 Header Spoofing Bypass
+        # 4.1 Direct Spoofable Header Authentication Bypass
+        samples.append({
+            "id": f"s10k-py-hdr-bool-{ent}",
+            "language": "python",
+            "code": f'''def is_authenticated_{ent}_admin(request) -> bool:
+    """Check if request originates from trusted internal administrator."""
+    internal_header = request.headers.get("X-Internal-Admin")
+    if internal_header == "true" or internal_header == "1":
+        return True
+    return False''',
+            "is_vulnerable": True,
+            "vuln_class": "auth_bypass",
+            "explanation": f"[Data Flow] Admin authentication resolver checks `X-Internal-Admin` request header. [Security Trace] Returns `True` directly from client-controlled header value without cryptographic verification or gateway secret check. [Conclusion] Authentication bypass vulnerability allows spoofing administrator status via HTTP headers.",
+        })
+        samples.append({
+            "id": f"s10k-py-clean-hdr-bool-{ent}",
+            "language": "python",
+            "code": f'''def is_authenticated_{ent}_admin(request, expected_secret: str) -> bool:
+    """Check if request originates from trusted internal administrator with HMAC verification."""
+    internal_header = request.headers.get("X-Internal-Admin")
+    signature = request.headers.get("X-Internal-Signature")
+    if not internal_header or not signature:
+        return False
+    expected_sig = hmac.new(expected_secret.encode("utf-8"), internal_header.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected_sig):
+        return False
+    return internal_header == "true"''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Admin authentication resolver checks `X-Internal-Admin` and `X-Internal-Signature`. [Security Trace] Verifies HMAC signature using constant-time `hmac.compare_digest`. [Conclusion] Sound cryptographic authentication verification.",
+        })
+
+        # 4.2 Header Spoofing Identity Bypass
         samples.append({
             "id": f"s10k-py-hdr-{ent}",
             "language": "python",

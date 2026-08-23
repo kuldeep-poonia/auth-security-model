@@ -138,7 +138,7 @@ def run_simple_test_suite(model_path: str = "checkpoints_3b", model_id: str = "Q
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=160,
+                max_new_tokens=256,
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,

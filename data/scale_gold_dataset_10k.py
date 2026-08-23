@@ -1094,6 +1094,264 @@ public class {EntClass}Resource {{
             "explanation": f"[Data Flow] Fiber route accepts `id` parameter. [Security Trace] Guarded by `authMiddleware` and scopes query with `{owner_col} = ?`. [Conclusion] Properly authorized deletion handler.",
         })
 
+    # ==========================================================================
+    # 5. GENERIC REAL-WORLD & HARD ARCHITECTURAL PATTERNS
+    # ==========================================================================
+    generic_domains = [
+        ("document", "Document", "documents", "doc_id", "org_id", "Organization", "OrgMember"),
+        ("report", "Report", "reports", "report_id", "workspace_id", "Workspace", "WorkspaceMember"),
+        ("vault_item", "VaultItem", "vault_items", "item_id", "vault_id", "Vault", "VaultMember"),
+        ("analytics_query", "AnalyticsQuery", "queries", "query_id", "tenant_id", "Tenant", "TenantMember"),
+        ("dataset_export", "DatasetExport", "exports", "export_id", "account_id", "Account", "AccountMember"),
+        ("config_profile", "ConfigProfile", "profiles", "profile_id", "company_id", "Company", "CompanyMember"),
+    ]
+
+    for dom_name, DomClass, dom_table, dom_id, parent_id, ParentClass, MemberClass in generic_domains:
+        # 5.1 Standalone Header Spoofing Bypass
+        samples.append({
+            "id": f"s10k-gen-py-hdr-direct-{dom_name}",
+            "language": "python",
+            "code": f'''def is_authenticated_admin(request) -> bool:
+    """Verify administrator identity from request headers."""
+    internal_header = request.headers.get("X-Internal-Admin")
+    if internal_header == "true" or internal_header == "1":
+        return True
+    return False''',
+            "is_vulnerable": True,
+            "vuln_class": "auth_bypass",
+            "explanation": f"[Data Flow] Administrator check extracts `X-Internal-Admin` header from client request. [Security Trace] Grants admin privileges based on untrusted client header without cryptographic HMAC verification or gateway signature. [Conclusion] Critical authentication bypass vulnerability via spoofable request header.",
+        })
+        samples.append({
+            "id": f"s10k-gen-py-clean-hdr-direct-{dom_name}",
+            "language": "python",
+            "code": f'''def is_authenticated_admin(request, gateway_secret: str) -> bool:
+    """Verify administrator identity using HMAC signature."""
+    internal_header = request.headers.get("X-Internal-Admin")
+    sig_header = request.headers.get("X-Internal-Signature")
+    if not internal_header or not sig_header:
+        return False
+    expected_sig = hmac.new(gateway_secret.encode(), internal_header.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig_header, expected_sig):
+        return False
+    return internal_header == "true"''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Administrator check extracts `X-Internal-Admin` and `X-Internal-Signature`. [Security Trace] Verifies HMAC signature in constant time using `hmac.compare_digest`. [Conclusion] Sound cryptographic authentication verification.",
+        })
+
+        # 5.2 Standalone Webhook Timing Attack with Pre-Comparison Length Check
+        samples.append({
+            "id": f"s10k-gen-py-time-len-{dom_name}",
+            "language": "python",
+            "code": f'''def verify_webhook_signature(payload: bytes, signature_header: str, secret_key: str) -> bool:
+    """Validate webhook HMAC signature against payload."""
+    if not signature_header or not secret_key:
+        return False
+    
+    expected_mac = hmac.new(
+        secret_key.encode("utf-8"),
+        msg=payload,
+        digestmod=hashlib.sha256
+    ).hexdigest()
+    
+    # Fast check: reject mismatched length before constant-time comparison
+    if len(signature_header) != len(expected_mac):
+        return False
+        
+    return hmac.compare_digest(signature_header, expected_mac)''',
+            "is_vulnerable": True,
+            "vuln_class": "auth_bypass",
+            "explanation": f"[Data Flow] Webhook signature verifier computes expected SHA-256 HMAC. [Security Trace] Premature length check `len(signature_header) != len(expected_mac)` creates a timing side-channel discrepancy and leaks expected signature length before constant-time comparison. [Conclusion] Authentication bypass vulnerability via side-channel timing attack.",
+        })
+        samples.append({
+            "id": f"s10k-gen-py-clean-time-len-{dom_name}",
+            "language": "python",
+            "code": f'''def verify_webhook_signature(payload: bytes, signature_header: str, secret_key: str) -> bool:
+    """Validate webhook HMAC signature in constant time."""
+    if not signature_header or not secret_key:
+        return False
+    
+    expected_mac = hmac.new(
+        secret_key.encode("utf-8"),
+        msg=payload,
+        digestmod=hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature_header.encode("utf-8"), expected_mac.encode("utf-8"))''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Webhook signature verifier computes expected SHA-256 HMAC. [Security Trace] Directly invokes constant-time `hmac.compare_digest` across byte representations without fast-fail length checks. [Conclusion] Sound constant-time signature verification.",
+        })
+
+        # 5.3 Standalone Enum Hierarchy Inversion (Django Decorator)
+        samples.append({
+            "id": f"s10k-gen-py-enum-hier-{dom_name}",
+            "language": "python",
+            "code": f'''class UserRole(IntEnum):
+    GUEST = 0
+    AUDITOR = 1
+    ADMIN = 2
+    SUSPENDED = 3  # Inactive account state
+
+def require_minimum_clearance(required_role: UserRole):
+    def decorator(view_func):
+        @wraps(view_func)
+        def _wrapped_view(request, *args, **kwargs):
+            if not request.user.is_authenticated:
+                return HttpResponseForbidden("Authentication required")
+            
+            # Allow access if user role level meets or exceeds threshold
+            if request.user.role >= required_role:
+                return view_func(request, *args, **kwargs)
+                
+            return HttpResponseForbidden("Insufficient permission level")
+        return _wrapped_view
+    return decorator''',
+            "is_vulnerable": True,
+            "vuln_class": "incorrect_authz",
+            "explanation": f"[Data Flow] Role decorator evaluates `request.user.role`. [Security Trace] Numerical comparison `request.user.role >= required_role` inadvertently allows `SUSPENDED (3)` accounts to access endpoints requiring `AUDITOR (1)` or `ADMIN (2)`. [Conclusion] Incorrect authorization logic due to enum integer hierarchy flaw.",
+        })
+        samples.append({
+            "id": f"s10k-gen-py-clean-enum-hier-{dom_name}",
+            "language": "python",
+            "code": f'''class UserRole(IntEnum):
+    SUSPENDED = -1
+    GUEST = 0
+    AUDITOR = 1
+    ADMIN = 2
+
+def require_minimum_clearance(required_role: UserRole):
+    def decorator(view_func):
+        @wraps(view_func)
+        def _wrapped_view(request, *args, **kwargs):
+            if not request.user.is_authenticated or request.user.is_suspended:
+                return HttpResponseForbidden("Authentication required or account suspended")
+            
+            if request.user.role >= required_role and request.user.role > UserRole.GUEST:
+                return view_func(request, *args, **kwargs)
+                
+            return HttpResponseForbidden("Insufficient permission level")
+        return _wrapped_view
+    return decorator''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Role decorator evaluates `request.user.role`. [Security Trace] Explicitly rejects suspended state and enforces strict validated role hierarchy. [Conclusion] Sound role-based authorization check.",
+        })
+
+        # 5.4 Nested Foreign-Key Multi-Table IDOR (FastAPI + SQLAlchemy)
+        samples.append({
+            "id": f"s10k-gen-py-fa-nested-idor-{dom_name}",
+            "language": "python",
+            "code": f'''@router.get("/{dom_table}/{{{parent_id}}}/items/{{{dom_id}}}")
+async def get_{dom_name}_nested_item(
+    {parent_id}: UUID,
+    {dom_id}: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    # Verify caller has membership in the requested {parent_id}
+    membership = await db.scalar(
+        select({MemberClass}).where(
+            {MemberClass}.{parent_id} == {parent_id},
+            {MemberClass}.user_id == current_user.id
+        )
+    )
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this {parent_id}")
+
+    # Fetch item directly by primary key
+    stmt = (
+        select({DomClass})
+        .join({ParentClass}, {DomClass}.{parent_id} == {ParentClass}.id)
+        .where({DomClass}.id == {dom_id})
+    )
+    item = await db.scalar(stmt)
+    if not item:
+        raise HTTPException(status_code=404, detail="{DomClass} not found")
+
+    return item''',
+            "is_vulnerable": True,
+            "vuln_class": "IDOR",
+            "explanation": f"[Data Flow] Route parameters `{parent_id}` and `{dom_id}` passed to lookup. [Security Trace] Verifies `{MemberClass}` membership for `{parent_id}`, but queries `{DomClass}` with only `.where({DomClass}.id == {dom_id})` without scoping `{DomClass}.{parent_id} == {parent_id}`. [Conclusion] Insecure Direct Object Reference (IDOR) allows cross-tenant resource exfiltration.",
+        })
+        samples.append({
+            "id": f"s10k-gen-py-fa-clean-nested-idor-{dom_name}",
+            "language": "python",
+            "code": f'''@router.get("/{dom_table}/{{{parent_id}}}/items/{{{dom_id}}}")
+async def get_{dom_name}_nested_item(
+    {parent_id}: UUID,
+    {dom_id}: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    # Verify caller has membership in the requested {parent_id}
+    membership = await db.scalar(
+        select({MemberClass}).where(
+            {MemberClass}.{parent_id} == {parent_id},
+            {MemberClass}.user_id == current_user.id
+        )
+    )
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this {parent_id}")
+
+    # Scoped query with composite tenant filter
+    stmt = (
+        select({DomClass})
+        .where(
+            {DomClass}.id == {dom_id},
+            {DomClass}.{parent_id} == {parent_id}
+        )
+    )
+    item = await db.scalar(stmt)
+    if not item:
+        raise HTTPException(status_code=404, detail="{DomClass} not found")
+
+    return item''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Route parameters `{parent_id}` and `{dom_id}` passed to lookup. [Security Trace] Enforces parent membership and strictly scopes resource lookup to `{DomClass}.{parent_id} == {parent_id}`. [Conclusion] Properly authorized multi-tenant resource access.",
+        })
+
+        # 5.5 DRF ViewSet get_object() Object-Level Permission Omission
+        samples.append({
+            "id": f"s10k-gen-py-drf-omit-obj-perm-{dom_name}",
+            "language": "python",
+            "code": f'''class {DomClass}ViewSet(viewsets.ModelViewSet):
+    queryset = {DomClass}.objects.all()
+    serializer_class = {DomClass}Serializer
+    permission_classes = [permissions.IsAuthenticated, IsReportOwnerOrAuditor]
+
+    def get_object(self):
+        queryset = self.filter_queryset(self.get_queryset())
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        filter_kwargs = {{self.lookup_field: self.kwargs[lookup_url_kwarg]}}
+        obj = get_object_or_404(queryset, **filter_kwargs)
+        # Returns object directly without invoking self.check_object_permissions()
+        return obj''',
+            "is_vulnerable": True,
+            "vuln_class": "missing_authz_check",
+            "explanation": f"[Data Flow] ViewSet overrides `get_object()`. [Security Trace] Fetches model object with `get_object_or_404` but omits `self.check_object_permissions(self.request, obj)`. [Conclusion] Object-level permission classes are silently bypassed, permitting unauthorized cross-user access.",
+        })
+        samples.append({
+            "id": f"s10k-gen-py-clean-drf-obj-perm-{dom_name}",
+            "language": "python",
+            "code": f'''class {DomClass}ViewSet(viewsets.ModelViewSet):
+    queryset = {DomClass}.objects.all()
+    serializer_class = {DomClass}Serializer
+    permission_classes = [permissions.IsAuthenticated, IsReportOwnerOrAuditor]
+
+    def get_object(self):
+        queryset = self.filter_queryset(self.get_queryset())
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        filter_kwargs = {{self.lookup_field: self.kwargs[lookup_url_kwarg]}}
+        obj = get_object_or_404(queryset, **filter_kwargs)
+        self.check_object_permissions(self.request, obj)
+        return obj''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] ViewSet overrides `get_object()`. [Security Trace] Explicitly invokes `self.check_object_permissions(self.request, obj)` before returning instance. [Conclusion] Sound object-level authorization enforcement.",
+        })
+
     # Validate all samples
     valid_samples = [s for s in samples if validate_code_syntax(s["code"], s["language"])]
     print(f"Generated {len(valid_samples)} 100% AST-valid gold standard samples.")
@@ -1128,12 +1386,14 @@ def build_and_save_10k_dataset():
 
     def get_sample_entity(s):
         sid = s["id"]
+        if sid.startswith("s10k-gen-"):
+            return "generic"
         for e in all_entity_names:
             if e in sid:
                 return e
         return "other"
 
-    train_raw = [s for s in deduped if get_sample_entity(s) in train_entities]
+    train_raw = [s for s in deduped if (get_sample_entity(s) in train_entities or get_sample_entity(s) == "generic")]
     val_raw = [s for s in deduped if get_sample_entity(s) in val_entities]
     test_raw = [s for s in deduped if get_sample_entity(s) in test_entities]
 

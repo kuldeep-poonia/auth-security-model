@@ -358,11 +358,11 @@ def resolve_best_checkpoint(adapter_dir: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Fine-Tuned Model on Test Split")
-    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-0.5B-Instruct", help="Base model identifier")
-    parser.add_argument("--model_path", type=str, default="checkpoints", help="Path to fine-tuned LoRA checkpoint directory")
+    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-1.5B-Instruct", help="Base model identifier")
+    parser.add_argument("--model_path", type=str, default="checkpoints_1.5b", help="Path to fine-tuned LoRA checkpoint directory")
     parser.add_argument("--adapter_path", type=str, default=None, help="Alias for model_path")
     parser.add_argument("--test_file", type=str, default="data/splits/test.json", help="Path to held-out test split JSON")
-    parser.add_argument("--output_dir", type=str, default="evaluation/results", help="Directory to store evaluation outputs")
+    parser.add_argument("--output_dir", type=str, default="evaluation/results_1.5b", help="Directory to store evaluation outputs")
     parser.add_argument("--batch_size", type=int, default=8, help="Evaluation batch size")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--run_baseline", action="store_true", help="Also evaluate zero-shot base model")

@@ -182,8 +182,8 @@ def run_simple_test_suite(model_path: str = "checkpoints_3b", model_id: str = "Q
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Simple Auth/Authz Capability Test Suite")
-    parser.add_argument("--model_path", type=str, default="checkpoints_3b", help="Path to checkpoint/adapter directory")
-    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-3B-Instruct", help="Base model ID")
+    parser.add_argument("--model_path", type=str, default="checkpoints_1.5b", help="Path to checkpoint/adapter directory")
+    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-1.5B-Instruct", help="Base model ID")
     args = parser.parse_args()
 
     run_simple_test_suite(model_path=args.model_path, model_id=args.model_id)

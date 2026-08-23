@@ -471,7 +471,7 @@ def parse_args():
     parser.add_argument(
         "--model_id",
         type=str,
-        default="Qwen/Qwen2.5-Coder-0.5B-Instruct",
+        default="Qwen/Qwen2.5-Coder-1.5B-Instruct",
         help="Hugging Face base model identifier",
     )
     parser.add_argument(
@@ -489,7 +489,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="checkpoints",
+        default="checkpoints_1.5b",
         help="Directory to store model checkpoints and adapters",
     )
     parser.add_argument(

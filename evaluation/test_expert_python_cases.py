@@ -253,7 +253,7 @@ def run_expert_python_challenge(model_path: str = "checkpoints", model_id: str =
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Expert Python Authorization Challenge")
-    parser.add_argument("--model_path", type=str, default="checkpoints")
-    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-0.5B-Instruct")
+    parser.add_argument("--model_path", type=str, default="checkpoints_1.5b")
+    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-Coder-1.5B-Instruct")
     args = parser.parse_args()
     run_expert_python_challenge(model_path=args.model_path, model_id=args.model_id)

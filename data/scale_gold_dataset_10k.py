@@ -451,6 +451,132 @@ public ResponseEntity<{EntClass}> get{EntClass}(
             "vuln_class": "none",
             "explanation": f"[Data Flow] Laravel download method accepts route `$id`. [Security Trace] Scopes query to `{owner_col} == Auth::id()`. [Conclusion] Secure file download strictly restricted to owner.",
         })
+        # 1.8 Multi-Table Nested Join IDOR (FastAPI + SQLAlchemy)
+        samples.append({
+            "id": f"s10k-py-fa-nested-join-idor-{ent}",
+            "language": "python",
+            "code": f'''@router.get("/api/v1/organizations/{{org_id}}/{table}/{{item_id}}")
+async def get_org_{ent}_nested(
+    org_id: UUID,
+    item_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Retrieve {ent} inside organization."""
+    # Verify caller membership in the organization
+    membership = await db.scalar(
+        select(OrgMember).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == current_user.id
+        )
+    )
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this organization")
+
+    # Flaw: Queries {EntClass} directly by primary key without filtering by org_id
+    stmt = (
+        select({EntClass})
+        .join(Organization, {EntClass}.org_id == Organization.id)
+        .where({EntClass}.id == item_id)
+    )
+    record = await db.scalar(stmt)
+    if not record:
+        raise HTTPException(status_code=404, detail="{EntClass} not found")
+    return record''',
+            "is_vulnerable": True,
+            "vuln_class": "IDOR",
+            "explanation": f"[Data Flow] Route accepts `org_id` and `item_id`. [Security Trace] Queries `OrgMember` for membership, but fetches `{EntClass}` without scoping `{EntClass}.org_id == org_id`, allowing cross-tenant {ent} exfiltration. [Conclusion] Insecure Direct Object Reference (IDOR) via nested foreign-key query omission.",
+        })
+        samples.append({
+            "id": f"s10k-py-fa-clean-nested-join-idor-{ent}",
+            "language": "python",
+            "code": f'''@router.get("/api/v1/organizations/{{org_id}}/{table}/{{item_id}}")
+async def get_org_{ent}_nested(
+    org_id: UUID,
+    item_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Retrieve {ent} inside organization with strict tenant binding."""
+    membership = await db.scalar(
+        select(OrgMember).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == current_user.id
+        )
+    )
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this organization")
+
+    stmt = (
+        select({EntClass})
+        .where(
+            {EntClass}.id == item_id,
+            {EntClass}.org_id == org_id
+        )
+    )
+    record = await db.scalar(stmt)
+    if not record:
+        raise HTTPException(status_code=404, detail="{EntClass} not found")
+    return record''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Route accepts `org_id` and `item_id`. [Security Trace] Verifies membership and enforces composite filter `{EntClass}.id == item_id AND {EntClass}.org_id == org_id`. [Conclusion] Properly authorized nested tenant object retrieval.",
+        })
+
+        # 1.9 Multi-Table Nested Join IDOR (Express + Sequelize)
+        samples.append({
+            "id": f"s10k-js-nested-join-idor-{ent}",
+            "language": "javascript",
+            "code": f'''app.get('/api/workspaces/:wsId/{table}/:id', authenticateToken, async (req, res) => {{
+  try {{
+    const {{ wsId, id }} = req.params;
+    const member = await db.WorkspaceMember.findOne({{
+      where: {{ workspaceId: wsId, userId: req.user.id }}
+    }});
+    if (!member) {{
+      return res.status(403).json({{ error: 'Forbidden' }});
+    }}
+    // Flaw: Item query missing workspaceId scoping
+    const item = await db.{table}.findByPk(id);
+    if (!item) {{
+      return res.status(404).json({{ error: 'Not found' }});
+    }}
+    return res.json(item);
+  }} catch (err) {{
+    return res.status(500).json({{ error: err.message }});
+  }}
+}});''',
+            "is_vulnerable": True,
+            "vuln_class": "IDOR",
+            "explanation": f"[Data Flow] Route parameter `wsId` and `id` passed to lookup. [Security Trace] Verifies caller workspace membership but retrieves `{table}` using `findByPk(id)` without verifying `item.workspaceId === wsId`. [Conclusion] Insecure Direct Object Reference via un-scoped secondary resource lookup.",
+        })
+        samples.append({
+            "id": f"s10k-js-clean-nested-join-idor-{ent}",
+            "language": "javascript",
+            "code": f'''app.get('/api/workspaces/:wsId/{table}/:id', authenticateToken, async (req, res) => {{
+  try {{
+    const {{ wsId, id }} = req.params;
+    const member = await db.WorkspaceMember.findOne({{
+      where: {{ workspaceId: wsId, userId: req.user.id }}
+    }});
+    if (!member) {{
+      return res.status(403).json({{ error: 'Forbidden' }});
+    }}
+    const item = await db.{table}.findOne({{
+      where: {{ id: id, workspaceId: wsId }}
+    }});
+    if (!item) {{
+      return res.status(404).json({{ error: 'Not found' }});
+    }}
+    return res.json(item);
+  }} catch (err) {{
+    return res.status(500).json({{ error: err.message }});
+  }}
+}});''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Route parameter `wsId` and `id` passed to lookup. [Security Trace] Verifies membership and queries `{table}` with `where: {{ id: id, workspaceId: wsId }}`. [Conclusion] Sound multi-tenant scoping prevents unauthorized data access.",
+        })
 
     # ==========================================================================
     # 2. MISSING AUTHORIZATION CHECKS (Privileged Actions Without Guards)
@@ -562,7 +688,7 @@ public class {EntClass}AdminService {{
             })
 
     # ==========================================================================
-    # 3. INCORRECT AUTHORIZATION (Inverted Checks & Role Hierarchy Flaws)
+    # 3. INCORRECT AUTHORIZATION (Inverted Checks, Enum Flaws & Hierarchy Bugs)
     # ==========================================================================
     for ent, EntClass, table, col, owner_col, actor in ENTITIES_60:
         for r_name, r_enum, r_check, r_scope, r_perm in ROLES_SCALE:
@@ -597,7 +723,58 @@ public class {EntClass}AdminService {{
                 "explanation": f"[Data Flow] Permission evaluator checks user state. [Security Trace] Rejects unauthenticated or suspended callers before verifying `{r_check}`. [Conclusion] Sound and correct authorization decision logic.",
             })
 
-            # 3.2 Go Inverted Clearance Level
+            # 3.2 Python Enum Integer Value Privilege Escalation
+            samples.append({
+                "id": f"s10k-py-enum-inc-{ent}-{r_name}",
+                "language": "python",
+                "code": f'''class {EntClass}AccessLevel(IntEnum):
+    GUEST = 0
+    AUDITOR = 1
+    ADMIN = 2
+    SUSPENDED = 3  # Inactive account state
+
+def require_{ent}_clearance(required_role: {EntClass}AccessLevel):
+    def decorator(view_func):
+        @wraps(view_func)
+        def _wrapped(request, *args, **kwargs):
+            if not request.user.is_authenticated:
+                return HttpResponseForbidden("Authentication required")
+            # Flaw: SUSPENDED (3) satisfies >= check for AUDITOR (1) or ADMIN (2)
+            if request.user.role_level >= required_role:
+                return view_func(request, *args, **kwargs)
+            return HttpResponseForbidden("Insufficient permission level")
+        return _wrapped
+    return decorator''',
+                "is_vulnerable": True,
+                "vuln_class": "incorrect_authz",
+                "explanation": f"[Data Flow] Clearance decorator evaluates `request.user.role_level`. [Security Trace] Compares `role_level >= required_role` where `SUSPENDED = 3` has higher integer value than authorized tiers, granting suspended users access. [Conclusion] Incorrect authorization logic due to faulty Enum integer hierarchy.",
+            })
+            samples.append({
+                "id": f"s10k-py-clean-enum-inc-{ent}-{r_name}",
+                "language": "python",
+                "code": f'''class {EntClass}AccessLevel(IntEnum):
+    SUSPENDED = -1
+    GUEST = 0
+    AUDITOR = 1
+    ADMIN = 2
+
+def require_{ent}_clearance(required_role: {EntClass}AccessLevel):
+    def decorator(view_func):
+        @wraps(view_func)
+        def _wrapped(request, *args, **kwargs):
+            if not request.user.is_authenticated or request.user.is_suspended:
+                return HttpResponseForbidden("Authentication required or account suspended")
+            if request.user.role_level >= required_role and request.user.role_level > {EntClass}AccessLevel.GUEST:
+                return view_func(request, *args, **kwargs)
+            return HttpResponseForbidden("Insufficient permission level")
+        return _wrapped
+    return decorator''',
+                "is_vulnerable": False,
+                "vuln_class": "none",
+                "explanation": f"[Data Flow] Clearance decorator evaluates `request.user.role_level`. [Security Trace] Explicitly rejects suspended state and enforces strict validated role hierarchy. [Conclusion] Sound role-based authorization check.",
+            })
+
+            # 3.3 Go Inverted Clearance Level
             samples.append({
                 "id": f"s10k-go-inc-{ent}-{r_name}",
                 "language": "go",
@@ -671,7 +848,52 @@ public class {EntClass}AdminService {{
             "explanation": f"[Data Flow] Authentication resolver inspects user and signature headers. [Security Trace] Verifies HMAC signature using constant-time `hmac.compare_digest`. [Conclusion] Secure identity assertion with cryptographic verification.",
         })
 
-        # 4.2 Cryptographic Timing Attack on Webhook Signatures
+        # 4.2 Cryptographic Timing Attack via Pre-Comparison Length Check
+        samples.append({
+            "id": f"s10k-py-time-len-{ent}",
+            "language": "python",
+            "code": f'''def verify_{ent}_webhook_signature(payload: bytes, signature_header: str, secret_key: str) -> bool:
+    """Verify incoming HMAC signature."""
+    if not signature_header or not secret_key:
+        return False
+    
+    expected_mac = hmac.new(
+        secret_key.encode("utf-8"),
+        msg=payload,
+        digestmod=hashlib.sha256
+    ).hexdigest()
+    
+    # Flaw: Fast length check leaks expected length and creates timing discrepancy
+    if len(signature_header) != len(expected_mac):
+        return False
+        
+    return hmac.compare_digest(signature_header, expected_mac)''',
+            "is_vulnerable": True,
+            "vuln_class": "auth_bypass",
+            "explanation": f"[Data Flow] Webhook verifier computes expected HMAC signature. [Security Trace] Guards comparison with standard `len() != len()` check, leaking signature length and creating a timing side channel prior to constant-time verification. [Conclusion] Authentication bypass vulnerability via side-channel timing attack.",
+        })
+        samples.append({
+            "id": f"s10k-py-clean-time-len-{ent}",
+            "language": "python",
+            "code": f'''def verify_{ent}_webhook_signature(payload: bytes, signature_header: str, secret_key: str) -> bool:
+    """Verify incoming HMAC signature in constant time."""
+    if not signature_header or not secret_key:
+        return False
+    
+    expected_mac = hmac.new(
+        secret_key.encode("utf-8"),
+        msg=payload,
+        digestmod=hashlib.sha256
+    ).hexdigest()
+    
+    # Constant-time comparison across full digest without fast-fail length leak
+    return hmac.compare_digest(signature_header.encode("utf-8"), expected_mac.encode("utf-8"))''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Webhook verifier computes expected HMAC signature. [Security Trace] Directly invokes `hmac.compare_digest` in constant time without non-constant early length guards. [Conclusion] Secure cryptographic authentication verification.",
+        })
+
+        # 4.3 Cryptographic Timing Attack on Webhook Signatures (JavaScript)
         samples.append({
             "id": f"s10k-js-time-{ent}",
             "language": "javascript",
@@ -687,7 +909,27 @@ public class {EntClass}AdminService {{
             "vuln_class": "auth_bypass",
             "explanation": f"[Data Flow] Webhook verifier computes expected HMAC signature. [Security Trace] Uses standard `===` operator leaking comparison timing differences. [Conclusion] Authentication bypass via timing side-channel attack.",
         })
-        # 4.3 JWT None Algorithm / Unverified Signature
+        samples.append({
+            "id": f"s10k-js-clean-time-{ent}",
+            "language": "javascript",
+            "code": f'''function check{EntClass}WebhookSignature(rawBody, incomingSig, secretKey) {{
+  if (!incomingSig || !secretKey) {{
+    return false;
+  }}
+  const expected = crypto.createHmac('sha256', secretKey).update(rawBody).digest('hex');
+  const bufA = Buffer.from(incomingSig, 'utf8');
+  const bufB = Buffer.from(expected, 'utf8');
+  if (bufA.length !== bufB.length) {{
+    return false;
+  }}
+  return crypto.timingSafeEqual(bufA, bufB);
+}}''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Webhook verifier computes expected HMAC signature. [Security Trace] Uses `crypto.timingSafeEqual` over buffers. [Conclusion] Sound constant-time verification.",
+        })
+
+        # 4.4 JWT None Algorithm / Unverified Signature
         samples.append({
             "id": f"s10k-py-jwt-{ent}",
             "language": "python",
@@ -709,7 +951,42 @@ public class {EntClass}AdminService {{
             "explanation": f"[Data Flow] JWT token validator decodes bearer token. [Security Trace] Enforces `verify_signature=True` with mandatory standard claims. [Conclusion] Secure cryptographic token verification.",
         })
 
-        # 4.4 PHP Laravel Gates Authorization
+        # 4.5 Sound Complex Two-Factor Token Exchange (Hard Negative Clean Sample)
+        samples.append({
+            "id": f"s10k-py-clean-exchange-{ent}",
+            "language": "python",
+            "code": f'''def exchange_{ent}_pre_auth_token(db: Session, raw_token: str, client_ip: str) -> Tuple[User, str]:
+    """Exchange single-use pre-auth token for session."""
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    
+    with db.begin():
+        record = db.execute(
+            select(PreAuthSession)
+            .where(
+                PreAuthSession.token_hash == token_hash,
+                PreAuthSession.is_used == False,
+                PreAuthSession.expires_at > datetime.now(timezone.utc)
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        
+        if not record:
+            raise InvalidCredentialsException("Invalid or expired session token")
+            
+        record.is_used = True
+        user = record.user
+        
+        if not user.is_active or user.is_suspended:
+            raise AccountDisabledException("User account is inactive or suspended")
+            
+        session_id = create_authenticated_session(db, user=user, ip=client_ip)
+        return user, session_id''',
+            "is_vulnerable": False,
+            "vuln_class": "none",
+            "explanation": f"[Data Flow] Authentication resolver accepts raw token and executes token exchange. [Security Trace] Enforces atomic locking, single-use nonce invalidation, expiry verification, and user active status check. [Conclusion] Secure cryptographic token exchange implementation.",
+        })
+
+        # 4.6 PHP Laravel Gates Authorization
         samples.append({
             "id": f"s10k-php-gate-{ent}",
             "language": "php",
@@ -745,7 +1022,7 @@ public class {EntClass}AdminService {{
             "explanation": f"[Data Flow] Controller delete action takes `$id`. [Security Trace] Enforces `$this->authorize('delete', $item)` policy gate. [Conclusion] Properly authorized resource deletion.",
         })
 
-        # 4.5 Java Quarkus Security Annotation
+        # 4.7 Java Quarkus Security Annotation
         samples.append({
             "id": f"s10k-java-quarkus-{ent}",
             "language": "java",
@@ -785,7 +1062,7 @@ public class {EntClass}Resource {{
             "explanation": f"[Data Flow] Quarkus resource exposes batch export endpoint. [Security Trace] Annotated with `@RolesAllowed(\"ADMIN\")`. [Conclusion] Protected by role-based access control.",
         })
 
-        # 4.6 Go Fiber Context Middleware Check
+        # 4.8 Go Fiber Context Middleware Check
         samples.append({
             "id": f"s10k-go-fiber-{ent}",
             "language": "go",

@@ -41,7 +41,7 @@ except Exception:
 
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from training.dataset_formatter import SYSTEM_PROMPT, format_user_prompt
-from training.train_utils import setup_logger, find_latest_checkpoint
+from training.logger import ExperimentLogger
 
 
 class MinedErrorDataset(Dataset):
@@ -153,7 +153,7 @@ class PenaltyWeightedTrainer(Trainer):
 
 def train_punish_and_correct(args):
     """Execute targeted punishment fine-tuning on mined failure instances."""
-    logger = setup_logger(output_dir=args.output_dir, log_file="punish_and_correct.jsonl")
+    logger = ExperimentLogger(run_name="punish_and_correct", log_dir=args.output_dir)
     logger.log_event("init", {"model_id": args.model_id, "mined_file": args.mined_file})
 
     if not os.path.exists(args.mined_file):

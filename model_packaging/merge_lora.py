@@ -44,6 +44,13 @@ def merge_lora_to_base(
     print(f"  • Output Dir:   {output_dir}")
     print("=" * 80)
 
+    # Auto-detect reinforced adapter if default was passed
+    if adapter_path == "checkpoints_1.5b/final_adapter":
+        reinforced_path = os.path.join(PROJECT_ROOT, "checkpoints_1.5b_reinforced", "final_adapter")
+        if os.path.exists(reinforced_path) and os.path.exists(os.path.join(reinforced_path, "adapter_model.safetensors")):
+            print(f"[INFO] Auto-detected latest reinforced adapter: {reinforced_path}")
+            adapter_path = reinforced_path
+
     if not os.path.exists(adapter_path):
         raise FileNotFoundError(f"Adapter path not found: {adapter_path}")
 

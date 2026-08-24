@@ -75,6 +75,13 @@ class AuthSecurityDetector:
         self._load_engine()
 
     def _load_engine(self):
+        # Auto-detect latest reinforced adapter if available
+        if self.model_path == "checkpoints_1.5b/final_adapter":
+            reinforced_path = os.path.join(PROJECT_ROOT, "checkpoints_1.5b_reinforced", "final_adapter")
+            if os.path.exists(reinforced_path) and os.path.exists(os.path.join(reinforced_path, "adapter_model.safetensors")):
+                print(f"[INFO] Auto-resolved latest reinforced adapter: {reinforced_path}")
+                self.model_path = reinforced_path
+
         print(f"[INFO] Initializing AuthSecurityDetector on device: {self.device}")
         start = time.time()
 

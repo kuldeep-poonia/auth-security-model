@@ -1,0 +1,30 @@
+MIT License
+
+Copyright (c) 2026 Kuldeep Poonia
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+### 💬 Review & Feedback Request
+
+This model and scanning framework is free and open source for everyone to use, adapt, and build upon. If you use AuthGuard in your workflows, research, security tools, or production pipelines, we kindly ask that you:
+1. **Leave a Review & Share Your Experience:** Open a GitHub Discussion or Issue sharing your benchmarks, findings, or feedback.
+2. **Give a Star:** Star the repository on GitHub if you found it useful!
+3. **Cite / Mention:** Credit the repository if used in academic papers, security publications, or commercial tools.

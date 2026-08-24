@@ -171,9 +171,14 @@ python model_packaging/export_gguf.py --model_dir checkpoints/merged_model --qua
 
 ---
 
-## 🤝 Contributing & Support
+## 🤝 Community Feedback & Review Request
 
-Contributions, feedback, and pull requests are welcome! If you find this model useful for securing your applications or research, please **give this repo a ⭐ Star!**
+This model and scanning framework is **100% Free & Open Source (MIT License)** for everyone—developers, security researchers, enterprises, and students alike.
+
+If you test or deploy AuthGuard-1.5B in your workflow:
+- 💬 **Please Leave a Review:** Share your experience, scan results, or benchmark findings in [GitHub Discussions / Issues](https://github.com/kuldeep-poonia/auth-security-model/issues)!
+- ⭐ **Star the Project:** If this helped you secure your backend or learn authorization security, consider starring the repo.
+- 📢 **Feedback Welcome:** Tell us which frameworks or languages you want added next!
 
 <div align="center">
 
@@ -185,4 +190,4 @@ Contributions, feedback, and pull requests are welcome! If you find this model u
 
 ## 📄 License
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details. Free for both commercial and personal use.

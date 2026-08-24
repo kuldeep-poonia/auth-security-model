@@ -6,10 +6,21 @@ __pycache__/
 # Pytest cache
 .pytest_cache/
 
-# Local runs and checkpoints (synced with Drive)
+# Local runs and checkpoints
 checkpoints/
+checkpoints_*/
+qwen1.5b_security_adapter/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.zip
+*.tar.gz
 runs/*.jsonl
 !runs/.gitkeep
+
+# PDFs and binaries
+*.pdf
 
 # Environments
 .venv/
@@ -29,4 +40,3 @@ data/raw_staging_manifest.json
 data/cleaned_dataset_manifest.json
 data/cleaned_negative_examples.json
 data/cleaned_positive_pairs.json
-

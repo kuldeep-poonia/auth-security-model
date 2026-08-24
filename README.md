@@ -3,7 +3,8 @@
 # 🛡️ AuthGuard-1.5B: Autonomous AI Security Auditor
 ### *Specialized Large Language Model for Deep Authorization & Authentication Vulnerability Detection*
 
-[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-poonia98%2Fauthguard--1.5b-ffd166.svg?style=for-the-badge&logo=huggingface)](https://huggingface.co/poonia98/authguard-1.5b)
+[![Live Demo](https://img.shields.io/badge/%F0%9F%9A%80%20Live%20Demo-Hugging%20Face%20Spaces-10a37f.svg?style=for-the-badge&logo=huggingface)](https://huggingface.co/spaces/poonia98/authguard-1.5b)
+[![Hugging Face Model](https://img.shields.io/badge/%F0%9F%A4%97%20Model%20Hub-poonia98%2Fauthguard--1.5b-ffd166.svg?style=for-the-badge&logo=huggingface)](https://huggingface.co/poonia98/authguard-1.5b)
 [![GitHub Stars](https://img.shields.io/github/stars/kuldeep-poonia/auth-security-model?style=for-the-badge&color=ffd166&logo=github)](https://github.com/kuldeep-poonia/auth-security-model/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Accuracy](https://img.shields.io/badge/Hardcore_Benchmark-98.33%25-brightgreen?style=for-the-badge&logo=target)](https://github.com/kuldeep-poonia/auth-security-model)
@@ -12,6 +13,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)](https://www.python.org/)
 
 <p align="center">
+  <a href="https://huggingface.co/spaces/poonia98/authguard-1.5b"><b>🚀 Live Web UI Demo (Spaces)</b></a> • 
   <a href="https://huggingface.co/poonia98/authguard-1.5b"><b>🤗 Hugging Face Model Hub</b></a> • 
   <a href="#-quick-start"><b>⚡ Quick Start</b></a> • 
   <a href="#-benchmark-results"><b>📊 Hardcore Benchmark</b></a> • 

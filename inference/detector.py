@@ -8,6 +8,7 @@ Supports inference across:
 
 import json
 import os
+import re
 import sys
 import time
 from typing import Any, Dict, List, Optional
@@ -32,8 +33,99 @@ except Exception:
     pass
 
 from peft import PeftModel
-from training.dataset_formatter import SYSTEM_PROMPT, format_user_prompt
-from evaluation.eval_model import extract_json_from_response
+
+# System prompt defining structured JSON contract
+SYSTEM_PROMPT = (
+    "You are an expert security auditor specialized in web application authentication and authorization vulnerabilities.\n"
+    "Analyze the provided code unit and determine if it contains an authentication or authorization vulnerability.\n"
+    "You must output ONLY valid JSON matching this schema:\n"
+    "{\n"
+    '  "vulnerable": boolean,\n'
+    '  "vuln_class": "IDOR" | "auth_bypass" | "missing_authz_check" | "incorrect_authz" | "none",\n'
+    '  "confidence": float (0.0 to 1.0),\n'
+    '  "explanation": string,\n'
+    '  "flagged_lines": [start_line, end_line]\n'
+    "}"
+)
+
+
+def format_user_prompt(code: str, language: str) -> str:
+    """Format input code snippet and language into user prompt."""
+    if not code:
+        code = ""
+    sanitized_code = re.sub(r"\n{3,}", "\n\n", code).strip()
+    return f"Language: {language}\n\nCode:\n```{language}\n{sanitized_code}\n```"
+
+
+def normalize_prediction(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure consistent standard keys across varying JSON schemas."""
+    is_vuln = False
+    if "vulnerable" in raw:
+        val = raw["vulnerable"]
+        is_vuln = (val is True or str(val).lower() == "true")
+    elif "is_vulnerable" in raw:
+        val = raw["is_vulnerable"]
+        is_vuln = (val is True or str(val).lower() == "true")
+
+    vuln_class = "none"
+    if "vuln_class" in raw:
+        vuln_class = str(raw["vuln_class"])
+    elif "vulnerability_class" in raw:
+        vuln_class = str(raw["vulnerability_class"])
+
+    if not is_vuln:
+        vuln_class = "none"
+    elif vuln_class == "none" or not vuln_class:
+        vuln_class = "missing_authz_check"
+
+    try:
+        confidence = float(raw.get("confidence", 0.90 if is_vuln else 0.05))
+    except (ValueError, TypeError):
+        confidence = 0.90 if is_vuln else 0.05
+
+    explanation = str(raw.get("explanation", ""))
+    flagged_lines = raw.get("flagged_lines", [])
+
+    return {
+        "is_vulnerable": is_vuln,
+        "vulnerability_class": vuln_class,
+        "confidence": confidence,
+        "explanation": explanation,
+        "flagged_lines": flagged_lines,
+    }
+
+
+def extract_json_from_response(response_text: str) -> Dict[str, Any]:
+    """Robustly extract and parse JSON completion from model output text."""
+    json_fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
+    if json_fence_match:
+        try:
+            return normalize_prediction(json.loads(json_fence_match.group(1)))
+        except json.JSONDecodeError:
+            pass
+
+    brace_match = re.search(r"(\{.*?\})", response_text, re.DOTALL)
+    if brace_match:
+        try:
+            return normalize_prediction(json.loads(brace_match.group(1)))
+        except json.JSONDecodeError:
+            pass
+
+    try:
+        return normalize_prediction(json.loads(response_text.strip()))
+    except json.JSONDecodeError:
+        pass
+
+    is_vuln = bool(re.search(r'"(?:is_vulnerable|vulnerable)"\s*:\s*true', response_text, re.IGNORECASE))
+    vuln_class = "missing_authz_check" if is_vuln else "none"
+
+    return {
+        "is_vulnerable": is_vuln,
+        "vulnerability_class": vuln_class,
+        "confidence": 0.85 if is_vuln else 0.05,
+        "explanation": response_text[:200] if response_text else "Heuristic parse",
+        "flagged_lines": [],
+    }
 
 
 LANGUAGE_EXTENSIONS = {
@@ -79,12 +171,11 @@ class AuthSecurityDetector:
         self._load_engine()
 
     def _load_engine(self):
-        # Auto-detect latest reinforced adapter if available
+        # Auto-detect latest adapter if available
         if self.model_path == "checkpoints_1.5b/final_adapter":
-            reinforced_path = os.path.join(PROJECT_ROOT, "checkpoints_1.5b_reinforced", "final_adapter")
-            if os.path.exists(reinforced_path) and os.path.exists(os.path.join(reinforced_path, "adapter_model.safetensors")):
-                print(f"[INFO] Auto-resolved latest reinforced adapter: {reinforced_path}")
-                self.model_path = reinforced_path
+            primary_path = os.path.join(PROJECT_ROOT, "checkpoints_1.5b", "final_adapter")
+            if os.path.exists(primary_path) and os.path.exists(os.path.join(primary_path, "adapter_model.safetensors")):
+                self.model_path = primary_path
 
         print(f"[INFO] Initializing AuthSecurityDetector on device: {self.device}")
         start = time.time()

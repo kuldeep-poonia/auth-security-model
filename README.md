@@ -3,12 +3,21 @@
 # 🛡️ AuthGuard-1.5B: Autonomous AI Security Auditor
 ### *Specialized Large Language Model for Deep Authorization & Authentication Vulnerability Detection*
 
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-poonia98%2Fauthguard--1.5b-ffd166.svg?style=for-the-badge&logo=huggingface)](https://huggingface.co/poonia98/authguard-1.5b)
 [![GitHub Stars](https://img.shields.io/github/stars/kuldeep-poonia/auth-security-model?style=for-the-badge&color=ffd166&logo=github)](https://github.com/kuldeep-poonia/auth-security-model/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Accuracy](https://img.shields.io/badge/Hardcore_Benchmark-98.33%25-brightgreen?style=for-the-badge&logo=target)](https://github.com/kuldeep-poonia/auth-security-model)
 [![Recall](https://img.shields.io/badge/Security_Recall-100.0%25-success?style=for-the-badge&logo=shield)](https://github.com/kuldeep-poonia/auth-security-model)
 [![VRAM Footprint](https://img.shields.io/badge/VRAM_Footprint-1.2_GB-blueviolet?style=for-the-badge&logo=nvidia)](https://github.com/kuldeep-poonia/auth-security-model)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)](https://www.python.org/)
+
+<p align="center">
+  <a href="https://huggingface.co/poonia98/authguard-1.5b"><b>🤗 Hugging Face Model Hub</b></a> • 
+  <a href="#-quick-start"><b>⚡ Quick Start</b></a> • 
+  <a href="#-benchmark-results"><b>📊 Hardcore Benchmark</b></a> • 
+  <a href="./architecture.md"><b>🔬 Architecture</b></a> • 
+  <a href="./security.md"><b>🔒 Security Policy</b></a>
+</p>
 
 </div>
 

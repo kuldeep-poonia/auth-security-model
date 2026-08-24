@@ -5,12 +5,14 @@ and authentication vulnerabilities in real-time.
 
 Run locally:
     python app.py
-    (Opens on http://localhost:7860 or http://localhost:8000)
+    (Opens on http://localhost:7860 or http://127.0.0.1:7860)
 """
 
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import json
 import os
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -18,15 +20,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
-import uvicorn
-
 from inference.detector import AuthSecurityDetector, LANGUAGE_EXTENSIONS
-import threading
-
-app = FastAPI(title="AuthGuard-1.5B Web Auditor")
 
 detector: Optional[AuthSecurityDetector] = None
 is_loading: bool = False
@@ -43,23 +37,6 @@ def _init_detector_worker():
         print(f"[ERROR] Failed to load detector: {e}")
     finally:
         is_loading = False
-
-
-@app.on_event("startup")
-def load_detector():
-    thread = threading.Thread(target=_init_detector_worker, daemon=True)
-    thread.start()
-
-
-@app.get("/api/health")
-def health_check():
-    global detector, is_loading
-    if detector is not None:
-        return {"status": "ready", "device": detector.device}
-    elif is_loading:
-        return {"status": "loading"}
-    else:
-        return {"status": "idle"}
 
 
 SAMPLE_PROMPTS = [
@@ -126,32 +103,6 @@ def reset_password(token: str, new_pass: str, db: Session = Depends(get_db)):
     return {"status": "success"}""",
     },
 ]
-
-
-class AuditRequest(BaseModel):
-    code: str
-    language: str = "python"
-
-
-@app.get("/api/samples")
-def get_samples():
-    return JSONResponse(SAMPLE_PROMPTS)
-
-
-@app.post("/api/audit")
-def audit_endpoint(req: AuditRequest):
-    global detector
-    if detector is None:
-        return JSONResponse(
-            status_code=503,
-            content={"error": "Detector model is still initializing. Please retry in a moment."},
-        )
-
-    try:
-        report = detector.audit_code(req.code, language=req.language)
-        return JSONResponse(report)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 HTML_PAGE = """<!DOCTYPE html>
@@ -551,7 +502,7 @@ HTML_PAGE = """<!DOCTYPE html>
             border-left-color: var(--accent-red);
         }
 
-        /* Floating Input Bar (ChatGPT style) */
+        /* Floating Input Bar */
         .input-bar-container {
             position: absolute;
             bottom: 0;
@@ -732,7 +683,6 @@ HTML_PAGE = """<!DOCTYPE html>
     <script>
         let samplesData = [];
 
-        // Load Samples on Startup
         async function loadSamples() {
             try {
                 const res = await fetch('/api/samples');
@@ -745,14 +695,12 @@ HTML_PAGE = """<!DOCTYPE html>
                 heroGrid.innerHTML = '';
 
                 samplesData.forEach((s, idx) => {
-                    // Sidebar item
                     const item = document.createElement('div');
                     item.className = 'sample-item';
                     item.innerHTML = `<span>${s.title}</span><span class="sample-badge">${s.tag}</span>`;
                     item.onclick = () => loadSamplePrompt(idx);
                     sidebarList.appendChild(item);
 
-                    // Hero card
                     const card = document.createElement('div');
                     card.className = 'suggestion-card';
                     card.innerHTML = `
@@ -808,13 +756,11 @@ HTML_PAGE = """<!DOCTYPE html>
 
             if (!code) return;
 
-            // Remove welcome hero if present
             const hero = document.getElementById('welcomeHero');
             if (hero) hero.remove();
 
             const chat = document.getElementById('chatContent');
 
-            // 1. Append User Message
             const userRow = document.createElement('div');
             userRow.className = 'msg-row';
             userRow.innerHTML = `
@@ -830,7 +776,6 @@ HTML_PAGE = """<!DOCTYPE html>
             `;
             chat.appendChild(userRow);
 
-            // 2. Append Loading Placeholder
             const loadingRow = document.createElement('div');
             loadingRow.className = 'msg-row';
             loadingRow.id = 'activeLoadingRow';
@@ -844,10 +789,7 @@ HTML_PAGE = """<!DOCTYPE html>
             `;
             chat.appendChild(loadingRow);
 
-            // Scroll down
             document.getElementById('scrollArea').scrollTop = document.getElementById('scrollArea').scrollHeight;
-
-            // Clear input & disable button
             document.getElementById('codeInput').value = '';
             sendBtn.disabled = true;
 
@@ -860,7 +802,6 @@ HTML_PAGE = """<!DOCTYPE html>
                 const report = await res.json();
                 loadingRow.remove();
 
-                // 3. Render Structured AI Report
                 const isVuln = report.is_vulnerable;
                 const vclass = (report.vulnerability_class || 'none').toUpperCase();
                 const confPercent = Math.round((report.confidence || 0) * 100);
@@ -901,7 +842,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 errRow.innerHTML = `
                     <div class="msg-avatar ai-avatar">⚠️</div>
                     <div class="msg-body">
-                        <div style="color: #ef4444; font-size: 13px;">Error communicating with detector: ${escapeHtml(err.message)}</div>
+                        <div style="color: #ef4444; font-size: 13px;">Error: ${escapeHtml(err.message)}</div>
                     </div>
                 `;
                 chat.appendChild(errRow);
@@ -917,7 +858,6 @@ HTML_PAGE = """<!DOCTYPE html>
             return div.innerHTML;
         }
 
-        // Initialize
         loadSamples();
     </script>
 </body>
@@ -925,15 +865,82 @@ HTML_PAGE = """<!DOCTYPE html>
 """
 
 
-@app.get("/", response_class=HTMLResponse)
-def index_view():
-    return HTMLResponse(content=HTML_PAGE)
+class AuthGuardHandler(BaseHTTPRequestHandler):
+    def _send_json(self, status: int, data: dict):
+        payload = json.dumps(data).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _send_html(self, html_str: str):
+        payload = html_str.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        if self.path == "/" or self.path == "/index.html":
+            self._send_html(HTML_PAGE)
+        elif self.path == "/api/samples":
+            self._send_json(200, SAMPLE_PROMPTS)
+        elif self.path == "/api/health":
+            self._send_json(200, {"status": "ready" if detector is not None else ("loading" if is_loading else "idle")})
+        else:
+            self.send_error(404, "Not Found")
+
+    def do_POST(self):
+        if self.path == "/api/audit":
+            length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(length)
+            try:
+                data = json.loads(body_bytes.decode("utf-8"))
+            except Exception:
+                self._send_json(400, {"error": "Invalid JSON payload"})
+                return
+
+            code = data.get("code", "")
+            language = data.get("language", "python")
+
+            global detector
+            if detector is None:
+                self._send_json(503, {"error": "Model is initializing. Please wait a moment..."})
+                return
+
+            try:
+                report = detector.audit_code(code, language=language)
+                self._send_json(200, report)
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+        else:
+            self.send_error(404, "Not Found")
+
+    def log_message(self, format, *args):
+        # Clean terminal logging
+        pass
+
+
+def run_server(port: int = 7860):
+    # Start background detector worker
+    threading.Thread(target=_init_detector_worker, daemon=True).start()
+
+    server_address = ("127.0.0.1", port)
+    httpd = ThreadingHTTPServer(server_address, AuthGuardHandler)
+    print("=" * 80)
+    print(f"  AUTHGUARD CHATGPT-STYLE WEB APP IS LIVE!")
+    print(f"  • Local URL: http://localhost:{port}  (or http://127.0.0.1:{port})")
+    print("=" * 80)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down server...")
+        httpd.server_close()
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
-    print("=" * 80)
-    print(f"  LAUNCHING AUTHGUARD CHATGPT-STYLE WEB APP")
-    print(f"  • URL: http://localhost:{port}")
-    print("=" * 80)
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    run_server(port=port)

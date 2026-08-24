@@ -104,7 +104,7 @@ class CustomPenaltyCollator:
         input_ids = [torch.tensor(b["input_ids"], dtype=torch.long) for b in batch]
         attention_mask = [torch.tensor(b["attention_mask"], dtype=torch.long) for b in batch]
         labels = [torch.tensor(b["labels"], dtype=torch.long) for b in batch]
-        penalties = torch.tensor([b["penalty_weight"] for b in batch], dtype=torch.float32)
+        penalties = torch.tensor([b.get("penalty_weight", 4.0) for b in batch], dtype=torch.float32)
 
         padded_input_ids = torch.nn.utils.rnn.pad_sequence(
             input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id or 0
@@ -231,6 +231,7 @@ def train_punish_and_correct(args):
         logging_steps=1,
         save_strategy="no",
         fp16=torch.cuda.is_available(),
+        remove_unused_columns=False,
         report_to="none",
     )
 

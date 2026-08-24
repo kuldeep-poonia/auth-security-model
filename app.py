@@ -1,13 +1,20 @@
-"""AuthGuard-1.5B — Native Gradio Web Application for Hugging Face Spaces (100% Free).
+"""AuthGuard-1.5B — Native Gradio Web Application for Hugging Face Spaces (ZeroGPU & CPU Compatible).
 
-Pixel-perfect, clean, ChatGPT-style interface for live real-time vulnerability
-auditing on Hugging Face Spaces & local execution.
+Supports Hugging Face ZeroGPU (Free A100 GPU allocation) and local execution.
 """
+
+# IMPORTANT: 'spaces' MUST be imported before torch for Hugging Face ZeroGPU
+try:
+    import spaces
+    has_spaces = True
+except ImportError:
+    has_spaces = False
 
 import json
 import os
 import re
 import sys
+import time
 import torch
 import gradio as gr
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -30,7 +37,6 @@ SYSTEM_PROMPT = (
     "}"
 )
 
-# Global model state
 tokenizer = None
 model = None
 
@@ -40,13 +46,13 @@ def load_model():
     if model is not None:
         return
 
-    print(f"[INFO] Loading Tokenizer from: {BASE_MODEL_ID}...")
+    print(f"[INFO] Initializing Tokenizer: {BASE_MODEL_ID}...")
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    print(f"[INFO] Loading Base Model: {BASE_MODEL_ID} (dtype={dtype})...")
+    print(f"[INFO] Loading Base Model: {BASE_MODEL_ID}...")
     base = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL_ID,
         torch_dtype=dtype,
@@ -54,7 +60,6 @@ def load_model():
         trust_remote_code=True,
     )
 
-    # Check for local adapter first, fallback to HF Hub
     local_adapter = os.path.join(os.path.dirname(__file__), "checkpoints_1.5b", "final_adapter")
     adapter_to_use = local_adapter if os.path.exists(os.path.join(local_adapter, "adapter_model.safetensors")) else ADAPTER_ID
 
@@ -62,9 +67,10 @@ def load_model():
     try:
         model = PeftModel.from_pretrained(base, adapter_to_use)
     except Exception:
-        print(f"[WARN] Local load failed, loading from Hugging Face Hub: {ADAPTER_ID}")
+        print(f"[WARN] Local load failed, downloading from Hugging Face Hub: {ADAPTER_ID}")
         model = PeftModel.from_pretrained(base, ADAPTER_ID)
 
+    model.eval()
     print("[OK] AuthGuard-1.5B is Online and Ready!")
 
 
@@ -85,7 +91,7 @@ def extract_json_from_response(text: str) -> dict:
     }
 
 
-def audit_code(code: str, language: str) -> str:
+def _run_audit_inference(code: str, language: str) -> str:
     if not code or not code.strip():
         return "⚠️ **Please enter or paste code to audit.**"
 
@@ -124,11 +130,9 @@ def audit_code(code: str, language: str) -> str:
 
     if is_vuln:
         badge = f"### 🚨 **VULNERABILITY DETECTED: `{vclass}`**"
-        status_color = "#ef4444"
         lines_info = f"\n- 📍 **Flagged Lines:** `{flagged}`" if flagged else ""
     else:
         badge = "### 🛡️ **CLEAN & SECURE (No Authorization Flaws)**"
-        status_color = "#10a37f"
         lines_info = ""
 
     markdown_report = f"""
@@ -146,6 +150,16 @@ def audit_code(code: str, language: str) -> str:
 *Audited by [AuthGuard-1.5B](https://huggingface.co/poonia98/authguard-1.5b) — 100% Security Recall Engine*
 """
     return markdown_report
+
+
+# Wrap with ZeroGPU decorator if running on Hugging Face ZeroGPU
+if has_spaces:
+    @spaces.GPU
+    def audit_code(code: str, language: str) -> str:
+        return _run_audit_inference(code, language)
+else:
+    def audit_code(code: str, language: str) -> str:
+        return _run_audit_inference(code, language)
 
 
 # Sample Code Templates
@@ -211,7 +225,7 @@ def load_sample(sample_name):
 
 CUSTOM_CSS = """
 .gradio-container {
-    max-width: 850px !important;
+    max-width: 820px !important;
     margin: auto !important;
     font-family: 'Inter', -apple-system, sans-serif !important;
 }
@@ -227,7 +241,7 @@ CUSTOM_CSS = """
 }
 """
 
-with gr.Blocks(title="AuthGuard AI Auditor", css=CUSTOM_CSS, theme=gr.themes.Base()) as demo:
+with gr.Blocks(title="AuthGuard AI Auditor", css=CUSTOM_CSS) as demo:
     with gr.Column():
         gr.Markdown(
             """

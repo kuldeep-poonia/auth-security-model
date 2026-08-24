@@ -60,10 +60,14 @@ class AuthSecurityDetector:
         base_model_id: str = "Qwen/Qwen2.5-Coder-1.5B-Instruct",
         device: Optional[str] = None,
         use_gguf: bool = False,
+        use_4bit: bool = True,
+        max_length: int = 1536,
     ):
         self.model_path = model_path
         self.base_model_id = base_model_id
         self.use_gguf = use_gguf
+        self.use_4bit = use_4bit
+        self.max_length = max_length
 
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -121,13 +125,39 @@ class AuthSecurityDetector:
             except Exception as e:
                 print(f"[INFO] Loading canonical tokenizer from {self.base_model_id} (fallback: {e})")
                 self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_id, trust_remote_code=True)
-            dtype = torch.float16 if self.device == "cuda" else torch.float32
-            base = AutoModelForCausalLM.from_pretrained(
-                self.base_model_id,
-                torch_dtype=dtype,
-                device_map=self.device if self.device == "cuda" else None,
-                trust_remote_code=True,
-            )
+
+            if self.use_4bit and self.device == "cuda":
+                try:
+                    from transformers import BitsAndBytesConfig
+                    bnb_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_compute_dtype=torch.float16,
+                        bnb_4bit_use_double_quant=True,
+                    )
+                    base = AutoModelForCausalLM.from_pretrained(
+                        self.base_model_id,
+                        quantization_config=bnb_config,
+                        device_map="auto",
+                        trust_remote_code=True,
+                    )
+                except Exception:
+                    dtype = torch.float16
+                    base = AutoModelForCausalLM.from_pretrained(
+                        self.base_model_id,
+                        torch_dtype=dtype,
+                        device_map=self.device,
+                        trust_remote_code=True,
+                    )
+            else:
+                dtype = torch.float16 if self.device == "cuda" else torch.float32
+                base = AutoModelForCausalLM.from_pretrained(
+                    self.base_model_id,
+                    torch_dtype=dtype,
+                    device_map=self.device if self.device == "cuda" else None,
+                    trust_remote_code=True,
+                )
+
             if os.path.exists(self.model_path):
                 self.model = PeftModel.from_pretrained(base, self.model_path)
             else:
@@ -183,7 +213,7 @@ class AuthSecurityDetector:
                     f"<|im_start|>assistant\n"
                 )
 
-            inputs = self.tokenizer(prompt_text, return_tensors="pt").to(self.device)
+            inputs = self.tokenizer(prompt_text, return_tensors="pt", truncation=True, max_length=self.max_length).to(self.device)
 
             with torch.no_grad():
                 outputs = self.model.generate(

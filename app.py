@@ -1,7 +1,7 @@
-"""AuthGuard-1.5B — Official ChatGPT-Style Web Application.
+"""AuthGuard-1.5B — Minimalist ChatGPT-Style Web Application.
 
-Pixel-perfect, crisp, light/dark responsive ChatGPT interface with Enter-to-send,
-instant sample loading, and real-time vulnerability analysis.
+Ultra-clean, full-canvas, distraction-free interface with Enter-to-send,
+instant sample cards, and real-time vulnerability detection.
 """
 
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -51,7 +51,7 @@ async def get_invoice(org_id: int, invoice_id: int, db: Session = Depends(get_db
     },
     {
         "id": "go-jwt-none",
-        "title": "Go JWT 'none' Alg Bypass",
+        "title": "Go JWT 'none' Algorithm Bypass",
         "tag": "Auth Bypass",
         "language": "go",
         "code": """func ValidateToken(tokenStr string) (*Claims, error) {
@@ -113,8 +113,6 @@ HTML_PAGE = """<!DOCTYPE html>
     <style>
         :root {
             --bg-page: #ffffff;
-            --bg-sidebar: #f9f9f9;
-            --bg-sidebar-hover: #ececec;
             --bg-bubble-user: #f4f4f4;
             --bg-input: #ffffff;
             --bg-card: #ffffff;
@@ -128,15 +126,10 @@ HTML_PAGE = """<!DOCTYPE html>
             --btn-send-hover: #2f2f2f;
             --code-bg: #1e1e1e;
             --code-text: #e6edf3;
-            --tag-idor: #dc2626;
-            --tag-bypass: #ea580c;
-            --tag-clean: #16a34a;
         }
 
         [data-theme="dark"] {
             --bg-page: #212121;
-            --bg-sidebar: #171717;
-            --bg-sidebar-hover: #262626;
             --bg-bubble-user: #2f2f2f;
             --bg-input: #2f2f2f;
             --bg-card: #282828;
@@ -164,146 +157,33 @@ HTML_PAGE = """<!DOCTYPE html>
             color: var(--text-primary);
             height: 100vh;
             display: flex;
+            flex-direction: column;
             overflow: hidden;
             transition: background-color 0.2s, color 0.2s;
         }
 
-        /* Left Sidebar */
-        .sidebar {
-            width: 260px;
-            background-color: var(--bg-sidebar);
+        /* Top Minimalist Header */
+        .top-header {
+            height: 56px;
             display: flex;
-            flex-direction: column;
-            border-right: 1px solid var(--border-subtle);
-            padding: 12px;
-            z-index: 100;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 28px;
+            border-bottom: 1px solid var(--border-subtle);
+            flex-shrink: 0;
         }
 
-        .new-chat-btn {
+        .brand-logo {
             display: flex;
             align-items: center;
             gap: 10px;
-            background: transparent;
-            border: 1px solid var(--border-subtle);
+            font-size: 16px;
+            font-weight: 600;
             color: var(--text-primary);
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
             cursor: pointer;
-            transition: all 0.15s ease;
-            margin-bottom: 16px;
         }
 
-        .new-chat-btn:hover {
-            background-color: var(--bg-sidebar-hover);
-        }
-
-        .sidebar-heading {
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--text-muted);
-            margin: 8px 6px;
-        }
-
-        .sample-list {
-            flex: 1;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .sample-btn {
-            padding: 8px 10px;
-            border-radius: 8px;
-            font-size: 13px;
-            color: var(--text-secondary);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: background 0.15s;
-            text-decoration: none;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .sample-btn:hover {
-            background-color: var(--bg-sidebar-hover);
-            color: var(--text-primary);
-        }
-
-        .sample-pill {
-            font-size: 10px;
-            font-weight: 600;
-            padding: 2px 6px;
-            border-radius: 4px;
-            background: rgba(0, 0, 0, 0.06);
-            color: var(--text-secondary);
-        }
-
-        [data-theme="dark"] .sample-pill {
-            background: rgba(255, 255, 255, 0.1);
-        }
-
-        .sidebar-footer {
-            border-top: 1px solid var(--border-subtle);
-            padding-top: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            font-size: 13px;
-        }
-
-        .sidebar-footer a {
-            color: var(--text-secondary);
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 4px 6px;
-            border-radius: 6px;
-            transition: background 0.15s;
-        }
-
-        .sidebar-footer a:hover {
-            background: var(--bg-sidebar-hover);
-            color: var(--text-primary);
-        }
-
-        /* Main Chat Canvas */
-        .chat-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            position: relative;
-            background-color: var(--bg-page);
-        }
-
-        .chat-top-header {
-            height: 52px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 24px;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .model-pill {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 15px;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .accuracy-badge {
+        .accuracy-pill {
             background: #dcfce7;
             color: #15803d;
             font-size: 11px;
@@ -313,51 +193,60 @@ HTML_PAGE = """<!DOCTYPE html>
             border: 1px solid #bbf7d0;
         }
 
-        [data-theme="dark"] .accuracy-badge {
+        [data-theme="dark"] .accuracy-pill {
             background: rgba(22, 163, 74, 0.2);
             color: #4ade80;
             border-color: rgba(22, 163, 74, 0.4);
         }
 
-        .theme-toggle-btn {
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-btn {
             background: transparent;
             border: 1px solid var(--border-subtle);
             color: var(--text-secondary);
             padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 12px;
+            border-radius: 8px;
+            font-size: 13px;
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 6px;
+            text-decoration: none;
+            transition: all 0.15s;
         }
 
-        .theme-toggle-btn:hover {
-            background: var(--bg-sidebar-hover);
+        .header-btn:hover {
+            background: var(--bg-card-hover);
             color: var(--text-primary);
         }
 
-        .chat-messages {
+        /* Chat Stream Canvas */
+        .chat-scroll {
             flex: 1;
             overflow-y: auto;
-            padding: 24px 0 160px;
+            padding: 28px 0 160px;
             display: flex;
             flex-direction: column;
             align-items: center;
         }
 
-        .chat-max-width {
+        .chat-canvas {
             width: 100%;
-            max-width: 760px;
-            padding: 0 20px;
+            max-width: 780px;
+            padding: 0 24px;
             display: flex;
             flex-direction: column;
             gap: 28px;
         }
 
-        /* Hero Blank Screen (Exact ChatGPT Style) */
-        .hero-view {
-            margin-top: 80px;
+        /* Centered Blank View */
+        .hero-section {
+            margin-top: 60px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -365,73 +254,88 @@ HTML_PAGE = """<!DOCTYPE html>
             gap: 16px;
         }
 
-        .hero-logo {
-            width: 48px;
-            height: 48px;
+        .hero-icon {
+            width: 52px;
+            height: 52px;
             border-radius: 50%;
             background: linear-gradient(135deg, #10a37f, #2563eb);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
+            font-size: 26px;
             color: #fff;
-            box-shadow: 0 4px 16px rgba(16, 163, 127, 0.2);
+            box-shadow: 0 4px 16px rgba(16, 163, 127, 0.25);
         }
 
         .hero-title {
             font-size: 28px;
             font-weight: 600;
             letter-spacing: -0.5px;
-            color: var(--text-primary);
         }
 
         .hero-sub {
             font-size: 14px;
             color: var(--text-secondary);
-            max-width: 500px;
+            max-width: 520px;
             line-height: 1.5;
         }
 
-        .hero-grid {
+        .prompt-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
+            gap: 12px;
             width: 100%;
             margin-top: 24px;
         }
 
-        .hero-card {
+        .prompt-card {
             background: var(--bg-card);
             border: 1px solid var(--border-subtle);
-            border-radius: 12px;
+            border-radius: 14px;
             padding: 14px 16px;
             text-align: left;
             cursor: pointer;
             transition: all 0.15s ease;
         }
 
-        .hero-card:hover {
+        .prompt-card:hover {
             background: var(--bg-card-hover);
             border-color: #bbb;
             transform: translateY(-1px);
         }
 
-        .hero-card-title {
+        .prompt-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .prompt-card-title {
             font-size: 13px;
             font-weight: 600;
             color: var(--text-primary);
-            margin-bottom: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
         }
 
-        .hero-card-desc {
+        .tag-pill {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.06);
+            color: var(--text-secondary);
+        }
+
+        [data-theme="dark"] .tag-pill {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .prompt-card-sub {
             font-size: 12px;
             color: var(--text-muted);
         }
 
-        /* Message Stream */
+        /* Message Turn */
         .msg-turn {
             display: flex;
             gap: 16px;
@@ -526,51 +430,38 @@ HTML_PAGE = """<!DOCTYPE html>
             color: var(--text-primary);
         }
 
-        .code-box {
-            background: var(--code-bg);
-            color: var(--code-text);
-            font-family: 'Fira Code', monospace;
-            font-size: 13px;
-            padding: 14px;
-            border-radius: 8px;
-            overflow-x: auto;
-            white-space: pre;
-            margin-top: 8px;
-            border: 1px solid var(--border-subtle);
-        }
-
         /* Floating Input Bar */
-        .input-anchor {
+        .input-bar-anchor {
             position: absolute;
             bottom: 0;
             left: 0;
             right: 0;
             display: flex;
             justify-content: center;
-            padding: 0 20px 24px;
+            padding: 0 24px 24px;
             background: linear-gradient(180deg, transparent 0%, var(--bg-page) 40%);
         }
 
-        .chat-input-pill {
+        .input-pill {
             width: 100%;
-            max-width: 760px;
+            max-width: 780px;
             background-color: var(--bg-input);
             border: 1px solid var(--border-input);
             border-radius: 20px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
             display: flex;
             flex-direction: column;
-            padding: 10px 14px;
+            padding: 12px 16px;
             gap: 6px;
             transition: all 0.2s ease;
         }
 
-        .chat-input-pill:focus-within {
+        .input-pill:focus-within {
             border-color: #888;
             box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
         }
 
-        .chat-textarea {
+        .input-textarea {
             width: 100%;
             background: transparent;
             border: none;
@@ -584,13 +475,13 @@ HTML_PAGE = """<!DOCTYPE html>
             max-height: 200px;
         }
 
-        .input-bar-controls {
+        .input-controls {
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
 
-        .language-dropdown {
+        .language-select {
             background: transparent;
             border: 1px solid var(--border-subtle);
             color: var(--text-secondary);
@@ -601,7 +492,7 @@ HTML_PAGE = """<!DOCTYPE html>
             cursor: pointer;
         }
 
-        .send-arrow-btn {
+        .send-btn {
             background: var(--btn-send);
             color: var(--bg-page);
             border: none;
@@ -615,12 +506,12 @@ HTML_PAGE = """<!DOCTYPE html>
             transition: transform 0.1s ease, background 0.15s;
         }
 
-        .send-arrow-btn:hover {
+        .send-btn:hover {
             background: var(--btn-send-hover);
             transform: scale(1.05);
         }
 
-        .send-arrow-btn:disabled {
+        .send-btn:disabled {
             background: #ccc;
             cursor: not-allowed;
             transform: none;
@@ -648,193 +539,168 @@ HTML_PAGE = """<!DOCTYPE html>
 </head>
 <body data-theme="light">
 
-    <!-- Left Sidebar -->
-    <div class="sidebar">
-        <button class="new-chat-btn" onclick="resetChat()">
-            <span style="font-size: 16px;">＋</span>
-            <span>New Security Audit</span>
-        </button>
+    <!-- Top Minimalist Bar -->
+    <div class="top-header">
+        <div class="brand-logo" onclick="resetCanvas()">
+            <span>🛡️ AuthGuard-1.5B</span>
+            <span class="accuracy-pill">98.33% Accuracy</span>
+        </div>
 
-        <div class="sidebar-heading">Test Examples</div>
-        <div class="sample-list" id="sampleContainer"></div>
-
-        <div class="sidebar-footer">
-            <a href="https://github.com/kuldeep-poonia/auth-security-model" target="_blank">
-                <span>⭐ GitHub Repo</span>
+        <div class="header-actions">
+            <button class="header-btn" onclick="resetCanvas()">
+                <span>＋ New Audit</span>
+            </button>
+            <a class="header-btn" href="https://github.com/kuldeep-poonia/auth-security-model" target="_blank">
+                <span>⭐ GitHub</span>
             </a>
-            <a href="https://huggingface.co/poonia98/authguard-1.5b" target="_blank">
-                <span>🤗 Hugging Face Hub</span>
+            <a class="header-btn" href="https://huggingface.co/poonia98/authguard-1.5b" target="_blank">
+                <span>🤗 Hugging Face</span>
             </a>
+            <button class="header-btn" onclick="toggleTheme()" id="themeBtn">
+                <span id="themeIcon">🌙</span>
+            </button>
         </div>
     </div>
 
-    <!-- Main Chat Workspace -->
-    <div class="chat-container">
-        <!-- Top Nav -->
-        <div class="chat-top-header">
-            <div class="model-pill">
-                <span>AuthGuard-1.5B</span>
-                <span class="accuracy-badge">98.33% Accuracy</span>
-            </div>
-            <button class="theme-toggle-btn" onclick="toggleTheme()">
-                <span id="themeIcon">🌙</span>
-                <span id="themeText">Dark Mode</span>
-            </button>
-        </div>
-
-        <!-- Chat History -->
-        <div class="chat-messages" id="chatArea">
-            <div class="chat-max-width" id="messageList">
-                
-                <!-- Hero Blank View -->
-                <div class="hero-view" id="heroView">
-                    <div class="hero-logo">🛡️</div>
-                    <div class="hero-title">What code would you like to audit?</div>
-                    <div class="hero-sub">
-                        Paste any backend function, controller, or endpoint. Press <b>Enter</b> to instantly analyze for IDOR, BOLA, Auth Bypass, or Privilege Escalations.
-                    </div>
-
-                    <div class="hero-grid" id="heroGrid"></div>
+    <!-- Chat Messages Viewport -->
+    <div class="chat-scroll" id="scrollContainer">
+        <div class="chat-canvas" id="chatCanvas">
+            
+            <!-- Hero Blank Greeting -->
+            <div class="hero-section" id="heroGreeting">
+                <div class="hero-icon">🛡️</div>
+                <div class="hero-title">What code would you like to audit?</div>
+                <div class="hero-sub">
+                    Paste any backend function, route, or controller. Press <b>Enter</b> to detect IDORs, BOLA, Auth Bypass, or Privilege Escalations with 100% recall.
                 </div>
 
+                <div class="prompt-grid" id="promptGrid"></div>
             </div>
+
         </div>
+    </div>
 
-        <!-- Input Bar (Enter to Send) -->
-        <div class="input-anchor">
-            <div class="chat-input-pill">
-                <textarea 
-                    class="chat-textarea" 
-                    id="userPromptInput" 
-                    placeholder="Paste code snippet here... (Press Enter to audit, Shift+Enter for new line)"
-                    onkeydown="handleKey(event)"
-                ></textarea>
+    <!-- Floating Input Pill (Enter to Send) -->
+    <div class="input-bar-anchor">
+        <div class="input-pill">
+            <textarea 
+                class="input-textarea" 
+                id="codePromptInput" 
+                placeholder="Paste code snippet here... (Press Enter to audit, Shift+Enter for new line)"
+                onkeydown="handleKeyPress(event)"
+            ></textarea>
 
-                <div class="input-bar-controls">
-                    <select class="language-dropdown" id="langPicker">
-                        <option value="python">Python</option>
-                        <option value="go">Go (Golang)</option>
-                        <option value="typescript">TypeScript</option>
-                        <option value="javascript">JavaScript</option>
-                        <option value="java">Java (Spring)</option>
-                        <option value="csharp">C# (.NET)</option>
-                        <option value="php">PHP (Laravel)</option>
-                    </select>
+            <div class="input-controls">
+                <select class="language-select" id="langSelector">
+                    <option value="python">Python</option>
+                    <option value="go">Go (Golang)</option>
+                    <option value="typescript">TypeScript</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="java">Java (Spring)</option>
+                    <option value="csharp">C# (.NET)</option>
+                    <option value="php">PHP (Laravel)</option>
+                </select>
 
-                    <button class="send-arrow-btn" id="sendArrowBtn" onclick="submitAudit()" title="Audit (Enter)">
-                        ↑
-                    </button>
-                </div>
+                <button class="send-btn" id="submitBtn" onclick="executeAudit()" title="Run Audit (Enter)">
+                    ↑
+                </button>
             </div>
         </div>
     </div>
 
     <script>
-        let sampleChallenges = [];
+        let samplePrompts = [];
 
-        // Load Sample Challenges
-        async function fetchSamples() {
+        async function fetchSamplePrompts() {
             try {
                 const res = await fetch('/api/samples');
-                sampleChallenges = await res.json();
+                samplePrompts = await res.json();
                 
-                const sidebarList = document.getElementById('sampleContainer');
-                const heroGrid = document.getElementById('heroGrid');
-                sidebarList.innerHTML = '';
-                heroGrid.innerHTML = '';
+                const grid = document.getElementById('promptGrid');
+                grid.innerHTML = '';
 
-                sampleChallenges.forEach((s, idx) => {
-                    // Sidebar element
-                    const btn = document.createElement('div');
-                    btn.className = 'sample-btn';
-                    btn.innerHTML = `<span>${s.title}</span><span class="sample-pill">${s.tag}</span>`;
-                    btn.onclick = () => loadSample(idx);
-                    sidebarList.appendChild(btn);
-
-                    // Hero card
+                samplePrompts.forEach((s, idx) => {
                     const card = document.createElement('div');
-                    card.className = 'hero-card';
+                    card.className = 'prompt-card';
                     card.innerHTML = `
-                        <div class="hero-card-title">
-                            <span>${s.title}</span>
-                            <span class="sample-pill">${s.tag}</span>
+                        <div class="prompt-card-top">
+                            <span class="prompt-card-title">${s.title}</span>
+                            <span class="tag-pill">${s.tag}</span>
                         </div>
-                        <div class="hero-card-desc">${s.language.toUpperCase()} • Click to test</div>
+                        <div class="prompt-card-sub">${s.language.toUpperCase()} • Click to test</div>
                     `;
-                    card.onclick = () => loadSample(idx);
-                    heroGrid.appendChild(card);
+                    card.onclick = () => loadPrompt(idx);
+                    grid.appendChild(card);
                 });
-            } catch (err) {
-                console.error("Samples load failed", err);
+            } catch (e) {
+                console.error("Failed to load samples", e);
             }
         }
 
-        function loadSample(idx) {
-            const s = sampleChallenges[idx];
+        function loadPrompt(idx) {
+            const s = samplePrompts[idx];
             if (!s) return;
-            const input = document.getElementById('userPromptInput');
+            const input = document.getElementById('codePromptInput');
             input.value = s.code;
-            document.getElementById('langPicker').value = s.language;
+            document.getElementById('langSelector').value = s.language;
             input.focus();
-            autoResize(input);
+            autoGrow(input);
         }
 
-        function resetChat() {
-            document.getElementById('messageList').innerHTML = `
-                <div class="hero-view" id="heroView">
-                    <div class="hero-logo">🛡️</div>
+        function resetCanvas() {
+            document.getElementById('chatCanvas').innerHTML = `
+                <div class="hero-section" id="heroGreeting">
+                    <div class="hero-icon">🛡️</div>
                     <div class="hero-title">What code would you like to audit?</div>
                     <div class="hero-sub">
-                        Paste any backend function, controller, or endpoint. Press <b>Enter</b> to instantly analyze for IDOR, BOLA, Auth Bypass, or Privilege Escalations.
+                        Paste any backend function, route, or controller. Press <b>Enter</b> to detect IDORs, BOLA, Auth Bypass, or Privilege Escalations with 100% recall.
                     </div>
-                    <div class="hero-grid" id="heroGrid"></div>
+                    <div class="prompt-grid" id="promptGrid"></div>
                 </div>
             `;
-            fetchSamples();
-            const input = document.getElementById('userPromptInput');
+            fetchSamplePrompts();
+            const input = document.getElementById('codePromptInput');
             input.value = '';
             input.focus();
         }
 
-        // Enter to Send, Shift+Enter for new line
-        function handleKey(e) {
+        function handleKeyPress(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                submitAudit();
+                executeAudit();
             } else {
-                autoResize(e.target);
+                autoGrow(e.target);
             }
         }
 
-        function autoResize(textarea) {
-            textarea.style.height = 'auto';
-            textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+        function autoGrow(element) {
+            element.style.height = 'auto';
+            element.style.height = Math.min(element.scrollHeight, 200) + 'px';
         }
 
-        async function submitAudit() {
-            const input = document.getElementById('userPromptInput');
+        async function executeAudit() {
+            const input = document.getElementById('codePromptInput');
             const code = input.value.trim();
-            const language = document.getElementById('langPicker').value;
-            const sendBtn = document.getElementById('sendArrowBtn');
+            const language = document.getElementById('langSelector').value;
+            const submitBtn = document.getElementById('submitBtn');
 
             if (!code) return;
 
-            // Remove hero greeting if present
-            const hero = document.getElementById('heroView');
+            const hero = document.getElementById('heroGreeting');
             if (hero) hero.remove();
 
-            const msgList = document.getElementById('messageList');
+            const canvas = document.getElementById('chatCanvas');
 
-            // 1. User Message Turn (Bubble)
+            // 1. User Bubble
             const userTurn = document.createElement('div');
             userTurn.className = 'msg-turn user';
             userTurn.innerHTML = `<div class="user-bubble">${escapeHtml(code)}</div>`;
-            msgList.appendChild(userTurn);
+            canvas.appendChild(userTurn);
 
             // 2. Loading Placeholder
             const loadingTurn = document.createElement('div');
             loadingTurn.className = 'msg-turn';
-            loadingTurn.id = 'loadingIndicator';
+            loadingTurn.id = 'loadingTurn';
             loadingTurn.innerHTML = `
                 <div class="ai-avatar">🛡️</div>
                 <div class="ai-body" style="justify-content: center;">
@@ -843,13 +709,12 @@ HTML_PAGE = """<!DOCTYPE html>
                     </div>
                 </div>
             `;
-            msgList.appendChild(loadingTurn);
+            canvas.appendChild(loadingTurn);
 
-            // Scroll down
-            scrollToBottom();
+            scrollBottom();
             input.value = '';
             input.style.height = '48px';
-            sendBtn.disabled = true;
+            submitBtn.disabled = true;
 
             try {
                 const response = await fetch('/api/audit', {
@@ -864,7 +729,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 const vclass = (report.vulnerability_class || 'none').toUpperCase();
                 const confPercent = Math.round((report.confidence || 0) * 100);
 
-                // 3. AI Assistant Verdict Turn
+                // 3. AI Verdict Response
                 const aiTurn = document.createElement('div');
                 aiTurn.className = 'msg-turn';
                 aiTurn.innerHTML = `
@@ -886,7 +751,7 @@ HTML_PAGE = """<!DOCTYPE html>
                         </div>
                     </div>
                 `;
-                msgList.appendChild(aiTurn);
+                canvas.appendChild(aiTurn);
             } catch (err) {
                 loadingTurn.remove();
                 const errTurn = document.createElement('div');
@@ -897,16 +762,16 @@ HTML_PAGE = """<!DOCTYPE html>
                         <div style="color:#ef4444; font-size:13px;">Error: ${escapeHtml(err.message)}</div>
                     </div>
                 `;
-                msgList.appendChild(errTurn);
+                canvas.appendChild(errTurn);
             } finally {
-                sendBtn.disabled = false;
-                scrollToBottom();
+                submitBtn.disabled = false;
+                scrollBottom();
             }
         }
 
-        function scrollToBottom() {
-            const chatArea = document.getElementById('chatArea');
-            chatArea.scrollTop = chatArea.scrollHeight;
+        function scrollBottom() {
+            const scroller = document.getElementById('scrollContainer');
+            scroller.scrollTop = scroller.scrollHeight;
         }
 
         function toggleTheme() {
@@ -914,7 +779,6 @@ HTML_PAGE = """<!DOCTYPE html>
             const isDark = body.getAttribute('data-theme') === 'dark';
             body.setAttribute('data-theme', isDark ? 'light' : 'dark');
             document.getElementById('themeIcon').textContent = isDark ? '🌙' : '☀️';
-            document.getElementById('themeText').textContent = isDark ? 'Dark Mode' : 'Light Mode';
         }
 
         function escapeHtml(text) {
@@ -923,8 +787,7 @@ HTML_PAGE = """<!DOCTYPE html>
             return div.innerHTML;
         }
 
-        // Initialize
-        fetchSamples();
+        fetchSamplePrompts();
     </script>
 </body>
 </html>
@@ -994,7 +857,7 @@ def run_server(port: int = 7860):
     server_address = ("127.0.0.1", port)
     httpd = ThreadingHTTPServer(server_address, AuthGuardHandler)
     print("=" * 80)
-    print(f"  AUTHGUARD CHATGPT-STYLE WEB APP IS LIVE!")
+    print(f"  AUTHGUARD MINIMALIST CHATGPT APP IS LIVE!")
     print(f"  • Local URL: http://localhost:{port}  (or http://127.0.0.1:{port})")
     print("=" * 80)
     try:

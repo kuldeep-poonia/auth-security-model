@@ -24,18 +24,42 @@ from pydantic import BaseModel
 import uvicorn
 
 from inference.detector import AuthSecurityDetector, LANGUAGE_EXTENSIONS
-
+import threading
 
 app = FastAPI(title="AuthGuard-1.5B Web Auditor")
 
 detector: Optional[AuthSecurityDetector] = None
+is_loading: bool = False
+
+
+def _init_detector_worker():
+    global detector, is_loading
+    try:
+        is_loading = True
+        print("[INFO] Initializing AuthGuard Detector Engine in background...")
+        detector = AuthSecurityDetector(device=None)
+        print("[OK] AuthGuard Detector is Ready!")
+    except Exception as e:
+        print(f"[ERROR] Failed to load detector: {e}")
+    finally:
+        is_loading = False
 
 
 @app.on_event("startup")
 def load_detector():
-    global detector
-    print("[INFO] Initializing AuthGuard Detector Engine...")
-    detector = AuthSecurityDetector(device=None)  # Auto-selects CUDA if available, else CPU
+    thread = threading.Thread(target=_init_detector_worker, daemon=True)
+    thread.start()
+
+
+@app.get("/api/health")
+def health_check():
+    global detector, is_loading
+    if detector is not None:
+        return {"status": "ready", "device": detector.device}
+    elif is_loading:
+        return {"status": "loading"}
+    else:
+        return {"status": "idle"}
 
 
 SAMPLE_PROMPTS = [

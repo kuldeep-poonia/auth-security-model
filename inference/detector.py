@@ -116,10 +116,11 @@ class AuthSecurityDetector:
         # Case 3: Base model + LoRA adapter
         else:
             print(f"[INFO] Loading base model ({self.base_model_id}) + LoRA ({self.model_path})")
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_path if os.path.exists(self.model_path) else self.base_model_id,
-                trust_remote_code=True,
-            )
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_path, trust_remote_code=True)
+            except Exception as e:
+                print(f"[INFO] Loading canonical tokenizer from {self.base_model_id} (fallback: {e})")
+                self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_id, trust_remote_code=True)
             dtype = torch.float16 if self.device == "cuda" else torch.float32
             base = AutoModelForCausalLM.from_pretrained(
                 self.base_model_id,
